@@ -1,0 +1,186 @@
+# =============================================================
+# DE Metadata Framework — Docker Compose
+# =============================================================
+# Services:
+#   minio        — S3-compatible object store (data lake + logs)
+#   minio-init   — one-shot bucket provisioner
+#   vault        — HashiCorp Vault (file backend, persistent)
+#   vault-init   — one-shot Vault bootstrapper (unseals + seeds secrets)
+#   ui           — Flask web UI (always running)
+#   pipeline     — spark-submit runner (on-demand via `docker-compose run`)
+#
+# First-time setup:
+#   1. Add SALT_2 and SUPABASE_DB_PASSWORD_PLAIN to .env
+#   2. docker-compose up -d minio vault      # start infrastructure
+#   3. docker-compose run --rm vault-init    # bootstrap Vault once
+#   4. docker-compose up -d ui              # start the UI
+#
+# Subsequent starts: docker-compose up -d
+
+services:
+
+  # ── MinIO — object store ────────────────────────────────────────────────────
+  minio:
+    image: minio/minio:latest
+    container_name: minio
+    restart: unless-stopped
+    environment:
+      MINIO_ROOT_USER:     ${MINIO_ACCESS_KEY:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${MINIO_SECRET_KEY:-minioadmin}
+    command: server /data --console-address ":9001"
+    ports:
+      - "9000:9000"   # S3 API
+      - "9001:9001"   # MinIO Console
+    volumes:
+      - minio_data:/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    networks:
+      - de-net
+
+  # ── MinIO Init — bucket provisioner ────────────────────────────────────────
+  minio-init:
+    image: minio/mc:latest
+    container_name: minio-init
+    restart: "no"
+    depends_on:
+      minio:
+        condition: service_healthy
+    environment:
+      MINIO_ACCESS_KEY:  ${MINIO_ACCESS_KEY:-minioadmin}
+      MINIO_SECRET_KEY:  ${MINIO_SECRET_KEY:-minioadmin}
+      MINIO_BUCKET:      ${MINIO_BUCKET:-de-data-lake}
+      SOURCE_S3_BUCKET:  ${SOURCE_S3_BUCKET:-de-source}
+    entrypoint: >
+      /bin/sh -c "
+        mc alias set local http://minio:9000 $$MINIO_ACCESS_KEY $$MINIO_SECRET_KEY &&
+        mc mb --ignore-existing local/$$MINIO_BUCKET &&
+        mc mb --ignore-existing local/$$SOURCE_S3_BUCKET &&
+        mc mb --ignore-existing local/de-iceberg-warehouse &&
+        mc mb --ignore-existing local/de-metadata-bucket &&
+        mc mb --ignore-existing local/de-data-migration-logs &&
+        echo 'All buckets ready'
+      "
+    networks:
+      - de-net
+
+  # ── HashiCorp Vault — secrets store ────────────────────────────────────────
+  vault:
+    image: hashicorp/vault:latest
+    container_name: vault
+    restart: unless-stopped
+    cap_add:
+      - IPC_LOCK   # prevents secret memory from being swapped to disk
+    environment:
+      VAULT_ADDR: http://127.0.0.1:8200
+      VAULT_LOCAL_CONFIG: |
+        {
+          "storage":  {"file": {"path": "/vault/data"}},
+          "listener": [{"tcp": {"address": "0.0.0.0:8200", "tls_disable": "true"}}],
+          "ui":       true,
+          "api_addr": "http://0.0.0.0:8200"
+        }
+    command: server
+    ports:
+      - "8200:8200"   # Vault API + UI
+    volumes:
+      - vault_data:/vault/data
+    healthcheck:
+      # passes as soon as the API is responding (sealed or unsealed)
+      test: ["CMD-SHELL", "vault status -address http://127.0.0.1:8200 2>&1 | grep -q Initialized"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+      start_period: 10s
+    networks:
+      - de-net
+
+  # ── Vault Init — bootstrap secrets ─────────────────────────────────────────
+  vault-init:
+    build: .
+    container_name: vault-init
+    entrypoint: ["python3", "/app/docker/vault_init.py"]
+    restart: "no"
+    depends_on:
+      vault:
+        condition: service_healthy
+    volumes:
+      - vault_data:/vault/data       # read/write init.json (unseal keys)
+      - vault_secrets:/vault/secrets # write pipeline_token + encrypted password
+    environment:
+      VAULT_ADDR:                 http://vault:8200
+      VAULT_PATH:                 ${VAULT_PATH:-encryption/pii}
+      SALT_2:                     ${SALT_2:-}
+      SUPABASE_DB_PASSWORD_PLAIN: ${SUPABASE_DB_PASSWORD_PLAIN:-}
+    networks:
+      - de-net
+
+  # ── Flask UI ────────────────────────────────────────────────────────────────
+  ui:
+    build: .
+    container_name: de-ui
+    entrypoint: ["/ui-entrypoint.sh"]
+    restart: unless-stopped
+    depends_on:
+      minio:
+        condition: service_healthy
+      minio-init:
+        condition: service_completed_successfully
+      vault-init:
+        condition: service_completed_successfully
+    env_file:
+      - .env
+    environment:
+      MINIO_ENDPOINT:       http://minio:9000
+      SOURCE_S3_ENDPOINT:   http://minio:9000
+      COMPOSE_PROJECT_NAME: de-metadata-framework
+      AWS_REGION:           us-east-1
+      AWS_DEFAULT_REGION:   us-east-1
+    volumes:
+      - vault_secrets:/vault/secrets:ro
+      - /var/run/docker.sock:/var/run/docker.sock
+    ports:
+      - "5001:5000"
+    networks:
+      - de-net
+
+  # ── Pipeline runner (on-demand) ─────────────────────────────────────────────
+  # Usage: docker-compose run --rm pipeline --application-name myapp ...
+  pipeline:
+    build: .
+    container_name: de-pipeline
+    restart: "no"
+    depends_on:
+      vault-init:
+        condition: service_completed_successfully
+      minio:
+        condition: service_healthy
+    env_file:
+      - .env
+    environment:
+      MINIO_ENDPOINT:     http://minio:9000
+      SOURCE_S3_ENDPOINT: http://minio:9000
+      AWS_REGION: us-east-1
+      AWS_DEFAULT_REGION: us-east-1
+    volumes:
+      - vault_secrets:/vault/secrets:ro
+    profiles:
+      - pipeline
+    networks:
+      - de-net
+
+volumes:
+  minio_data:
+    driver: local
+  vault_data:
+    driver: local
+  vault_secrets:
+    driver: local
+
+networks:
+  de-net:
+    driver: bridge

@@ -1,0 +1,22 @@
+-r requirements.txt
+
+# AWS Glue (moto mocking for tests)
+moto[glue,s3]>=5.0.0
+
+# AWS data wrangler (local dev)
+awswrangler>=3.6.0
+
+# Apache Airflow
+apache-airflow>=2.8.0
+apache-airflow-providers-amazon>=8.19.0
+apache-airflow-providers-apache-spark>=4.7.0
+
+# dbt
+dbt-core>=1.8.0
+dbt-glue>=1.8.0
+
+# UI
+flask>=3.0.0
+
+# Testing
+pytest>=8.0.0

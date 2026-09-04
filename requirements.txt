@@ -1,0 +1,42 @@
+# ── AWS / S3 ──────────────────────────────────────────────────────────────────
+# s3fs/aiobotocore intentionally excluded — not used in pipeline code.
+# boto3 is used directly for all S3/MinIO operations.
+boto3==1.43.78
+botocore==1.43.78
+s3transfer==0.19.2
+jmespath==1.1.0
+
+# ── Common utilities ──────────────────────────────────────────────────────────
+python-dateutil==2.9.0.post0
+python-dotenv==1.2.3
+pytz==2026.3.post1
+tzdata==2026.3
+six==1.17.0
+typing_extensions==4.16.0
+packaging==26.3
+requests==2.34.2
+urllib3==2.7.0
+certifi==2026.7.22
+charset-normalizer==3.5.1
+idna==3.19
+
+# ── Database ──────────────────────────────────────────────────────────────────
+sqlalchemy==2.0.52
+
+# ── HashiCorp Vault ───────────────────────────────────────────────────────────
+hvac==2.4.0
+requests-toolbelt==1.0.0
+
+# ── Docker SDK (UI uses this to launch pipeline container via host socket) ─────
+docker==7.2.0
+websocket-client==1.8.0
+
+# ── Flask ─────────────────────────────────────────────────────────────────────
+flask==3.1.3
+Werkzeug==3.1.8
+Jinja2==3.1.6
+MarkupSafe==3.0.3
+click==8.4.2
+itsdangerous==2.2.0
+blinker==1.9.0
+zstandard==0.25.0

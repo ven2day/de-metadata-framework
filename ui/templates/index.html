@@ -1,0 +1,717 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>DE Metadata Pipeline</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg:       #f7f7f8;
+      --surface:  #ffffff;
+      --border:   #e2e2e5;
+      --text:     #1a1a1a;
+      --muted:    #6b7280;
+      --accent:   #2563eb;
+      --accent-h: #1d4ed8;
+      --green:    #16a34a;
+      --red:      #dc2626;
+      --amber:    #d97706;
+      --radius:   6px;
+      --mono:     "JetBrains Mono", "Fira Mono", ui-monospace, monospace;
+    }
+
+    body {
+      font-family: system-ui, -apple-system, sans-serif;
+      font-size: 14px;
+      background: var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+      padding: 24px 16px;
+    }
+
+    /* ── Two-column page layout ── */
+    .page-wrapper {
+      display: flex;
+      gap: 16px;
+      align-items: flex-start;
+      max-width: 860px;
+      margin: 0 auto;
+      transition: max-width 0.25s ease;
+    }
+    .page-wrapper.logs-open { max-width: 1440px; }
+
+    .main-panel { flex: 1; min-width: 320px; }
+
+    /* ── Page header ── */
+    .page-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 16px;
+    }
+    h1 { font-size: 18px; font-weight: 600; letter-spacing: -0.3px; }
+    h1 span { color: var(--accent); }
+
+    .btn-toggle-log {
+      display: flex; align-items: center; gap: 6px;
+      padding: 6px 13px;
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      background: transparent;
+      font-size: 12px; font-weight: 500;
+      color: var(--muted); cursor: pointer;
+      transition: all 0.15s;
+    }
+    .btn-toggle-log:hover { border-color: var(--accent); color: var(--accent); }
+    .btn-toggle-log.active {
+      border-color: var(--accent);
+      color: var(--accent);
+      background: rgba(37,99,235,.06);
+    }
+    .btn-toggle-log .indicator {
+      width: 6px; height: 6px; border-radius: 50%;
+      background: var(--muted);
+      transition: background 0.2s;
+    }
+    .btn-toggle-log.running .indicator {
+      background: var(--accent);
+      animation: blink 1s infinite;
+    }
+
+    /* ── Connectivity bar ── */
+    .conn-bar {
+      display: flex;
+      align-items: center;
+      gap: 20px;
+      padding: 8px 14px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      margin-bottom: 14px;
+      font-size: 12px;
+    }
+    .conn-label {
+      font-size: 10px; font-weight: 600;
+      text-transform: uppercase; letter-spacing: 0.7px;
+      color: var(--muted); margin-right: 4px;
+    }
+    .conn-item { display: flex; align-items: center; gap: 5px; }
+    .conn-dot {
+      width: 7px; height: 7px; border-radius: 50%;
+      background: var(--border); flex-shrink: 0;
+    }
+    .conn-dot.ok      { background: var(--green); }
+    .conn-dot.err     { background: var(--red); }
+    .conn-dot.pinging { background: var(--accent); animation: blink 1s infinite; }
+    .conn-name { color: var(--muted); font-size: 12px; }
+    .conn-name.ok  { color: var(--text); }
+    .conn-name.err { color: var(--red); }
+    .conn-refresh {
+      margin-left: auto;
+      background: none; border: none;
+      font-size: 12px; color: var(--muted);
+      cursor: pointer; padding: 2px 4px;
+      border-radius: 3px;
+    }
+    .conn-refresh:hover { color: var(--accent); }
+
+    /* ── Card ── */
+    .card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 20px 24px;
+      margin-bottom: 14px;
+    }
+    .card-title {
+      font-size: 11px; font-weight: 600;
+      text-transform: uppercase; letter-spacing: 0.8px;
+      color: var(--muted); margin-bottom: 14px;
+    }
+
+    /* ── Source toggle ── */
+    .src-toggle {
+      display: inline-flex;
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      overflow: hidden;
+      margin-bottom: 18px;
+    }
+    .src-toggle input { display: none; }
+    .src-toggle label {
+      padding: 7px 20px; cursor: pointer;
+      font-size: 13px; font-weight: 500;
+      color: var(--muted); background: var(--surface);
+      transition: background 0.15s, color 0.15s; user-select: none;
+    }
+    .src-toggle input:checked + label { background: var(--accent); color: #fff; }
+
+    /* ── Grid / Fields ── */
+    .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+    .full { grid-column: 1 / -1; }
+    .field { display: flex; flex-direction: column; gap: 5px; }
+    label { font-size: 12px; font-weight: 500; color: var(--muted); }
+
+    input[type="text"], input[type="date"], select {
+      width: 100%; padding: 7px 10px;
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      font-size: 13px; font-family: inherit;
+      color: var(--text); background: var(--surface);
+      outline: none; transition: border-color 0.15s;
+    }
+    input:focus, select:focus { border-color: var(--accent); }
+
+    .source-section { display: none; }
+    .source-section.active { display: contents; }
+
+    /* ── Run button ── */
+    .btn-run {
+      width: 100%; padding: 10px;
+      background: var(--accent); color: #fff;
+      border: none; border-radius: var(--radius);
+      font-size: 13px; font-weight: 600;
+      cursor: pointer; transition: background 0.15s; margin-top: 4px;
+    }
+    .btn-run:hover  { background: var(--accent-h); }
+    .btn-run:disabled { opacity: 0.5; cursor: not-allowed; }
+
+    /* ─────────────────────────────────────────────
+       Pipeline visualization
+    ───────────────────────────────────────────── */
+    #pipeline-card { display: none; }
+
+    .pipeline {
+      display: flex; align-items: flex-start;
+      padding: 8px 0 4px; overflow-x: auto;
+    }
+
+    .step {
+      display: flex; flex-direction: column;
+      align-items: center; flex: 1;
+      min-width: 68px; position: relative;
+    }
+
+    .step:not(:last-child)::after {
+      content: '';
+      position: absolute; top: 11px;
+      left: calc(50% + 12px);
+      right: calc(-50% + 12px);
+      height: 2px; background: var(--border);
+      transition: background 0.4s; z-index: 0;
+    }
+    .step.done:not(:last-child)::after { background: var(--green); }
+    .step.fail:not(:last-child)::after { background: var(--red); }
+
+    .step-dot {
+      width: 24px; height: 24px; border-radius: 50%;
+      background: var(--border); border: 2px solid var(--border);
+      z-index: 1; position: relative;
+      transition: background 0.3s, border-color 0.3s;
+      display: flex; align-items: center; justify-content: center;
+    }
+    .step.running .step-dot { background: var(--accent); border-color: var(--accent); animation: pulse-ring 1s infinite; }
+    .step.done    .step-dot { background: var(--green); border-color: var(--green); }
+    .step.fail    .step-dot { background: var(--red); border-color: var(--red); }
+    .step.done .step-dot::after { content: '✓'; color: #fff; font-size: 11px; font-weight: 700; }
+    .step.fail .step-dot::after { content: '✕'; color: #fff; font-size: 11px; font-weight: 700; }
+
+    .step-label {
+      font-size: 10px; font-weight: 500;
+      color: var(--muted); margin-top: 7px;
+      text-align: center; line-height: 1.3; white-space: nowrap;
+    }
+    .step.running .step-label { color: var(--accent); }
+    .step.done    .step-label { color: var(--green); }
+    .step.fail    .step-label { color: var(--red); }
+
+    @keyframes pulse-ring {
+      0%   { box-shadow: 0 0 0 0   rgba(37,99,235,.5); }
+      70%  { box-shadow: 0 0 0 7px rgba(37,99,235,0); }
+      100% { box-shadow: 0 0 0 0   rgba(37,99,235,0); }
+    }
+
+    /* ── Job status row ── */
+    #job-status { display: flex; align-items: center; gap: 10px; margin-top: 16px; }
+    .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); flex-shrink: 0; }
+    .dot.running { background: var(--accent); animation: blink 1s infinite; }
+    .dot.ok      { background: var(--green); }
+    .dot.err     { background: var(--red); }
+    @keyframes blink { 0%,100%{opacity:1} 50%{opacity:.3} }
+    #status-text { font-size: 13px; color: var(--muted); flex: 1; }
+    .btn-action {
+      display: none; padding: 6px 13px;
+      background: transparent; border: 1px solid var(--border);
+      border-radius: var(--radius); font-size: 12px; font-weight: 500;
+      color: var(--text); cursor: pointer; text-decoration: none;
+      transition: border-color 0.15s, color 0.15s; white-space: nowrap;
+    }
+    .btn-action:hover { border-color: var(--accent); color: var(--accent); }
+    .btn-action.visible { display: inline-block; }
+
+    /* ─────────────────────────────────────────────
+       Right panel — live log
+    ───────────────────────────────────────────── */
+    .log-panel {
+      display: none;
+      width: 500px; flex-shrink: 0;
+      position: sticky; top: 24px;
+      height: calc(100vh - 48px);
+      flex-direction: column;
+      background: #0d0d0d;
+      border-radius: var(--radius);
+      border: 1px solid #252525;
+      overflow: hidden;
+    }
+    .log-panel.open { display: flex; }
+
+    .log-panel-header {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 10px 14px;
+      border-bottom: 1px solid #252525;
+      background: #161616;
+      flex-shrink: 0;
+    }
+    .log-panel-title {
+      font-size: 11px; font-weight: 600;
+      text-transform: uppercase; letter-spacing: 0.8px;
+      color: #7a7a7a;
+    }
+    .log-panel-actions { display: flex; align-items: center; gap: 8px; }
+    #log-line-count { font-size: 11px; color: #444; font-family: var(--mono); }
+    .btn-log-clear {
+      background: none; border: 1px solid #2d2d2d;
+      border-radius: 4px; padding: 3px 9px;
+      font-size: 11px; color: #666; cursor: pointer;
+    }
+    .btn-log-clear:hover { border-color: #555; color: #aaa; }
+
+    #live-log {
+      flex: 1; overflow-y: auto;
+      padding: 10px 14px;
+      font-family: var(--mono); font-size: 11.5px;
+      line-height: 1.75; color: #c9c9c9;
+      white-space: pre-wrap; word-break: break-all;
+      margin: 0;
+    }
+    #live-log::-webkit-scrollbar { width: 5px; }
+    #live-log::-webkit-scrollbar-track { background: transparent; }
+    #live-log::-webkit-scrollbar-thumb { background: #2d2d2d; border-radius: 3px; }
+    #live-log::-webkit-scrollbar-thumb:hover { background: #444; }
+
+    .ll      { display: block; }
+    .ll.err  { color: #f87171; }
+    .ll.warn { color: #fbbf24; }
+    .ll.ok   { color: #4ade80; }
+    .ll.dim  { color: #444; }
+
+    .log-empty {
+      padding: 40px 14px;
+      text-align: center;
+      font-size: 12px; color: #333;
+    }
+
+    /* ── Separator line in log ── */
+    .ll.sep {
+      color: #2d2d2d;
+      display: block;
+      padding: 2px 0;
+    }
+  </style>
+</head>
+<body>
+<div class="page-wrapper" id="page-wrapper">
+
+  <!-- ══ Left: main panel ═══════════════════════════════════════════════════ -->
+  <div class="main-panel">
+
+    <!-- Header -->
+    <div class="page-header">
+      <h1>DE Metadata <span>Pipeline</span></h1>
+      <button class="btn-toggle-log" id="log-toggle-btn" onclick="toggleLogPanel()">
+        <span class="indicator" id="log-indicator"></span>
+        Live Logs
+      </button>
+    </div>
+
+    <!-- Connectivity status -->
+    <div class="conn-bar">
+      <span class="conn-label">Services</span>
+      <div class="conn-item">
+        <div class="conn-dot pinging" id="conn-minio-dot"></div>
+        <span class="conn-name" id="conn-minio-name">MinIO</span>
+      </div>
+      <div class="conn-item">
+        <div class="conn-dot pinging" id="conn-vault-dot"></div>
+        <span class="conn-name" id="conn-vault-name">Vault</span>
+      </div>
+      <button class="conn-refresh" title="Re-check connectivity" onclick="checkConnectivity()">↻</button>
+    </div>
+
+    <form id="pipeline-form">
+
+      <!-- Source -->
+      <div class="card">
+        <div class="card-title">Source</div>
+        <div class="src-toggle">
+          <input type="radio" name="source_type" id="src-s3" value="s3" checked />
+          <label for="src-s3">S3</label>
+          <input type="radio" name="source_type" id="src-db" value="database" />
+          <label for="src-db">Database</label>
+        </div>
+        <div class="grid">
+          <div class="source-section active" id="section-s3">
+            <div class="field">
+              <label for="source_bucket">Source Bucket</label>
+              <input type="text" id="source_bucket" name="source_bucket" placeholder="de-source" />
+            </div>
+            <div class="field">
+              <label for="source_key">Source Key</label>
+              <input type="text" id="source_key" name="source_key" placeholder="folder/file.csv" />
+            </div>
+          </div>
+          <div class="source-section" id="section-db">
+            <div class="field">
+              <label for="source_database">Source Schema</label>
+              <input type="text" id="source_database" name="source_database" placeholder="public" />
+            </div>
+            <div class="field">
+              <label for="source_table_name">Source Table</label>
+              <input type="text" id="source_table_name" name="source_table_name" placeholder="my_table" />
+            </div>
+          </div>
+          <div class="field full">
+            <label for="metadata_key">Metadata Sheet Key</label>
+            <input type="text" id="metadata_key" name="metadata_key" placeholder="my_table_metadata.csv" />
+          </div>
+        </div>
+      </div>
+
+      <!-- Job -->
+      <div class="card">
+        <div class="card-title">Job</div>
+        <div class="grid">
+          <div class="field">
+            <label for="application_name">Application Name</label>
+            <input type="text" id="application_name" name="application_name" placeholder="Enigma_Aggregation" />
+          </div>
+          <div class="field">
+            <label for="ingest_date">Ingest Date</label>
+            <input type="date" id="ingest_date" name="ingest_date" />
+          </div>
+        </div>
+      </div>
+
+      <!-- Output -->
+      <div class="card">
+        <div class="card-title">Output</div>
+        <div class="grid">
+          <div class="field">
+            <label for="output_database">Output Database</label>
+            <input type="text" id="output_database" name="output_database" placeholder="de_lake" />
+          </div>
+          <div class="field">
+            <label for="output_catalog">Output Catalog</label>
+            <input type="text" id="output_catalog" name="output_catalog" value="minio" />
+          </div>
+          <div class="field">
+            <label for="output_table_name">Output Table Name <span style="font-weight:400">(optional)</span></label>
+            <input type="text" id="output_table_name" name="output_table_name" placeholder="defaults to application name" />
+          </div>
+          <div class="field">
+            <label for="write_mode">Write Mode</label>
+            <select id="write_mode" name="write_mode">
+              <option value="overwrite">overwrite</option>
+              <option value="append">append</option>
+              <option value="replace">replace</option>
+            </select>
+          </div>
+        </div>
+      </div>
+
+      <!-- Config -->
+      <div class="card">
+        <div class="card-title">Config</div>
+        <div class="grid">
+          <div class="field">
+            <label for="log_folder">Log Folder</label>
+            <input type="text" id="log_folder" name="log_folder" value="lake" />
+          </div>
+          <div class="field">
+            <label for="log_level">Log Level</label>
+            <select id="log_level" name="log_level">
+              <option value="INFO" selected>INFO</option>
+              <option value="DEBUG">DEBUG</option>
+              <option value="WARNING">WARNING</option>
+              <option value="ERROR">ERROR</option>
+            </select>
+          </div>
+        </div>
+      </div>
+
+      <button type="submit" class="btn-run" id="run-btn">&#9654;&nbsp; Run Pipeline</button>
+    </form>
+
+    <!-- Pipeline visualization -->
+    <div class="card" id="pipeline-card" style="display:none; margin-top:14px;">
+      <div class="card-title">Pipeline</div>
+      <div class="pipeline" id="pipeline-steps">
+        <div class="step" data-step="connectivity"><div class="step-dot"></div><div class="step-label">Connectivity</div></div>
+        <div class="step" data-step="spark">        <div class="step-dot"></div><div class="step-label">Spark Session</div></div>
+        <div class="step" data-step="metadata">     <div class="step-dot"></div><div class="step-label">Metadata</div></div>
+        <div class="step" data-step="source">       <div class="step-dot"></div><div class="step-label">Read Source</div></div>
+        <div class="step" data-step="schema">       <div class="step-dot"></div><div class="step-label">Schema Check</div></div>
+        <div class="step" data-step="pii">          <div class="step-dot"></div><div class="step-label">PII &amp; Types</div></div>
+        <div class="step" data-step="write">        <div class="step-dot"></div><div class="step-label">Write</div></div>
+        <div class="step" data-step="complete">     <div class="step-dot"></div><div class="step-label">Complete</div></div>
+      </div>
+      <div id="job-status">
+        <div class="dot" id="dot"></div>
+        <span id="status-text">Running…</span>
+        <a class="btn-action" id="download-btn" href="#">&#8595;&nbsp;Download Log</a>
+      </div>
+    </div>
+
+  </div><!-- /main-panel -->
+
+  <!-- ══ Right: live log panel ══════════════════════════════════════════════ -->
+  <div class="log-panel" id="log-panel">
+    <div class="log-panel-header">
+      <span class="log-panel-title">Live Logs</span>
+      <div class="log-panel-actions">
+        <span id="log-line-count">0 lines</span>
+        <button class="btn-log-clear" onclick="clearLog()">Clear</button>
+      </div>
+    </div>
+    <pre id="live-log"><span class="log-empty">Logs will stream here when a job runs.</span></pre>
+  </div>
+
+</div><!-- /page-wrapper -->
+
+<script>
+  // ── Connectivity check ─────────────────────────────────────────────────────
+  async function checkConnectivity() {
+    const setConn = (svc, state, label) => {
+      document.getElementById(`conn-${svc}-dot`).className  = `conn-dot ${state}`;
+      const nameEl = document.getElementById(`conn-${svc}-name`);
+      nameEl.className   = `conn-name ${state}`;
+      nameEl.textContent = label;
+    };
+    setConn('minio', 'pinging', 'MinIO');
+    setConn('vault', 'pinging', 'Vault');
+    try {
+      const r    = await fetch('/connectivity');
+      const data = await r.json();
+      const st   = (v) => v === 'ok' ? 'ok' : 'err';
+      setConn('minio', st(data.minio), data.minio === 'ok' ? 'MinIO' : 'MinIO — ' + data.minio);
+      setConn('vault', st(data.vault), data.vault === 'ok' ? 'Vault' : 'Vault — ' + data.vault);
+    } catch (e) {
+      setConn('minio', 'err', 'MinIO — unreachable');
+      setConn('vault', 'err', 'Vault — unreachable');
+    }
+  }
+  checkConnectivity();
+  setInterval(checkConnectivity, 30000);
+
+  // ── Log panel toggle ───────────────────────────────────────────────────────
+  let _logOpen = false;
+  function toggleLogPanel() {
+    _logOpen = !_logOpen;
+    document.getElementById('log-panel').classList.toggle('open', _logOpen);
+    document.getElementById('page-wrapper').classList.toggle('logs-open', _logOpen);
+    document.getElementById('log-toggle-btn').classList.toggle('active', _logOpen);
+  }
+
+  // ── Live log append ────────────────────────────────────────────────────────
+  let _lineCount = 0;
+  let _autoScroll = true;
+
+  function appendLog(line) {
+    const pre = document.getElementById('live-log');
+
+    // Remove placeholder on first real line
+    const empty = pre.querySelector('.log-empty');
+    if (empty) empty.remove();
+
+    if (!line) return;
+    _lineCount++;
+
+    const span = document.createElement('span');
+    span.className = 'll';
+
+    const lower = line.toLowerCase();
+    if (/\b(error|exception|failed|fail)\b/.test(lower))  span.classList.add('err');
+    else if (/\b(warn|warning)\b/.test(lower))            span.classList.add('warn');
+    else if (/pipeline complete|all.*passed|success/.test(lower)) span.classList.add('ok');
+    else if (/^(22\/|23\/|\s+at |py4j|spark\.|hadoop\.|java\.)/.test(line.trimStart())) span.classList.add('dim');
+
+    span.textContent = line + '\n';
+    pre.appendChild(span);
+
+    if (_autoScroll) pre.scrollTop = pre.scrollHeight;
+    document.getElementById('log-line-count').textContent = `${_lineCount} lines`;
+  }
+
+  function clearLog() {
+    const pre = document.getElementById('live-log');
+    pre.innerHTML = '<span class="log-empty">Log cleared.</span>';
+    _lineCount = 0;
+    document.getElementById('log-line-count').textContent = '0 lines';
+  }
+
+  function logSeparator(label) {
+    const pre  = document.getElementById('live-log');
+    const empty = pre.querySelector('.log-empty');
+    if (empty) empty.remove();
+    const sep = document.createElement('span');
+    sep.className   = 'll sep';
+    sep.textContent = `── ${label} ${'─'.repeat(Math.max(0, 48 - label.length))}`;
+    pre.appendChild(sep);
+  }
+
+  // keep scroll-to-bottom unless user scrolled up manually
+  document.getElementById('live-log').addEventListener('scroll', () => {
+    const el = document.getElementById('live-log');
+    _autoScroll = el.scrollTop + el.clientHeight >= el.scrollHeight - 8;
+  });
+
+  // ── Source toggle ──────────────────────────────────────────────────────────
+  document.querySelectorAll('input[name="source_type"]').forEach(r =>
+    r.addEventListener('change', () => {
+      const s3 = r.value === 's3';
+      document.getElementById('section-s3').classList.toggle('active', s3);
+      document.getElementById('section-db').classList.toggle('active', !s3);
+    })
+  );
+
+  document.getElementById('ingest_date').value = new Date().toISOString().slice(0, 10);
+
+  // ── Pipeline step definitions ──────────────────────────────────────────────
+  const STEPS = [
+    { id: 'connectivity', start: /Checking (source S3|Supabase|MinIO) connectivity/,       done: /All connectivity checks passed/,  fail: /Source S3 connection error|Supabase connectivity check failed|MinIO connection error/ },
+    { id: 'spark',        start: /Building SparkSession/,                                   done: /SparkSession created/,            fail: /SparkException|Failed to start Spark/ },
+    { id: 'metadata',     start: /Reading metadata sheet/,                                  done: /Loaded metadata with/,            fail: /Metadata sheet missing|missing required columns/ },
+    { id: 'source',       start: /Reading (CSV|JSON|Parquet) file|Reading database table/,  done: /Loaded \d+ columns/,              fail: /Path does not exist|AnalysisException|JDBC.*error/i },
+    { id: 'schema',       start: /Loaded \d+ columns/,                                     done: /Schema validation passed/,        fail: /Schema validation failed|Schema mismatch/ },
+    { id: 'pii',          start: /Exporting Transit key|Reading KV secret|Hashed column|Masked column|encrypted/, done: /Writing Iceberg table/, fail: /key not exportable|vault.*error/i },
+    { id: 'write',        start: /Writing Iceberg table/,                                   done: /Write complete/,                  fail: /Write.*fail|IcebergException/i },
+    { id: 'complete',     start: /Write complete/,                                          done: /ETL Pipeline Complete/,           fail: /Failed to upload log/ },
+  ];
+
+  const stepStatus = {};
+  STEPS.forEach(s => stepStatus[s.id] = 'pending');
+
+  function setStep(id, status) {
+    if (stepStatus[id] === 'fail') return;
+    stepStatus[id] = status;
+    const el = document.querySelector(`[data-step="${id}"]`);
+    if (el) el.className = `step ${status}`;
+  }
+
+  function processLine(line) {
+    for (let i = 0; i < STEPS.length; i++) {
+      const s = STEPS[i];
+      if (s.fail && s.fail.test(line)) { setStep(s.id, 'fail'); return; }
+      if (s.done && s.done.test(line)) {
+        for (let j = 0; j <= i; j++) {
+          if (stepStatus[STEPS[j].id] === 'pending' || stepStatus[STEPS[j].id] === 'running')
+            setStep(STEPS[j].id, 'done');
+        }
+        return;
+      }
+      if (s.start && s.start.test(line)) {
+        for (let j = 0; j < i; j++) {
+          if (stepStatus[STEPS[j].id] === 'pending' || stepStatus[STEPS[j].id] === 'running')
+            setStep(STEPS[j].id, 'done');
+        }
+        if (stepStatus[s.id] === 'pending') setStep(s.id, 'running');
+        return;
+      }
+    }
+  }
+
+  function resetSteps() {
+    STEPS.forEach(s => { setStep(s.id, 'pending'); stepStatus[s.id] = 'pending'; });
+  }
+
+  // ── Form submit ────────────────────────────────────────────────────────────
+  document.getElementById('pipeline-form').addEventListener('submit', async (e) => {
+    e.preventDefault();
+
+    const form   = e.target;
+    const btn    = document.getElementById('run-btn');
+    const pCard  = document.getElementById('pipeline-card');
+    const dot    = document.getElementById('dot');
+    const status = document.getElementById('status-text');
+    const dlBtn  = document.getElementById('download-btn');
+
+    btn.disabled        = true;
+    pCard.style.display = 'block';
+    dot.className       = 'dot running';
+    status.textContent  = 'Running…';
+    dlBtn.classList.remove('visible');
+    resetSteps();
+    pCard.scrollIntoView({ behavior: 'smooth' });
+
+    // mark log toggle as "running"
+    document.getElementById('log-toggle-btn').classList.add('running');
+    logSeparator(`${form.application_name.value}  ${form.ingest_date.value}`);
+    _autoScroll = true;
+
+    let fullLog = '';
+
+    try {
+      const res    = await fetch('/run', { method: 'POST', body: new FormData(form) });
+      const reader = res.body.getReader();
+      const dec    = new TextDecoder();
+      let   buffer = '';
+
+      while (true) {
+        const { value, done } = await reader.read();
+        if (done) break;
+
+        buffer += dec.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop();
+
+        for (const line of lines) {
+          fullLog += line + '\n';
+          processLine(line);
+          appendLog(line);
+        }
+      }
+      if (buffer) { fullLog += buffer; processLine(buffer); appendLog(buffer); }
+
+      const exitMatch = fullLog.match(/--- Exit (\d+) ---/);
+      const code = exitMatch ? parseInt(exitMatch[1]) : null;
+
+      if (code === 0) {
+        dot.className      = 'dot ok';
+        status.textContent = 'Completed successfully';
+      } else {
+        dot.className      = 'dot err';
+        status.textContent = `Failed (exit ${code ?? 'unknown'})`;
+        STEPS.forEach(s => { if (stepStatus[s.id] === 'running') setStep(s.id, 'fail'); });
+      }
+    } catch (err) {
+      dot.className      = 'dot err';
+      status.textContent = `Error: ${err.message}`;
+      STEPS.forEach(s => { if (stepStatus[s.id] === 'running') setStep(s.id, 'fail'); });
+    } finally {
+      btn.disabled = false;
+      document.getElementById('log-toggle-btn').classList.remove('running');
+
+      const appName    = form.application_name.value;
+      const ingestDate = form.ingest_date.value;
+      const logFolder  = form.log_folder.value || 'lake';
+      _logParams = { appName, ingestDate, logFolder };
+
+      dlBtn.href = `/download-log?app_name=${encodeURIComponent(appName)}&ingest_date=${encodeURIComponent(ingestDate)}&log_folder=${encodeURIComponent(logFolder)}`;
+      dlBtn.classList.add('visible');
+    }
+  });
+</script>
+</body>
+</html>

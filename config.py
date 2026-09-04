@@ -1,0 +1,20 @@
+# Thin compatibility shim — all config now lives in env/DE_Ingestion_properties.py
+from ingestion.env.DE_Ingestion_properties import (  # noqa: F401
+    SALT_KEY,
+    SOURCE_S3_BUCKET,
+    SOURCE_S3_REGION,
+    METADATA_S3_BUCKET,
+    METADATA_S3_KEY,
+    MINIO_ENDPOINT,
+    MINIO_ACCESS_KEY,
+    MINIO_SECRET_KEY,
+    MINIO_BUCKET,
+    SUPABASE_URL,
+    SUPABASE_KEY,
+    SUPABASE_JDBC_URL,
+    SUPABASE_DB_USER,
+    SUPABASE_DB_PASSWORD,
+    SPARK_APP_NAME,
+    SPARK_MASTER,
+    SPARK_PACKAGES,
+)

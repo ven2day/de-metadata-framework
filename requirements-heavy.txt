@@ -1,0 +1,21 @@
+# ── PySpark 4.1.3 + JRE 17 ───────────────────────────────────────────────────
+pyspark==4.1.3
+py4j==0.10.9.9
+
+# ── Spark Connect (gRPC — all three must be same release) ─────────────────────
+grpcio==1.83.0
+grpcio-status==1.83.0
+googleapis-common-protos==1.75.1
+protobuf==6.33.6
+
+# ── Data layer (large compiled binaries) ──────────────────────────────────────
+numpy==2.4.6
+pandas==3.0.5
+pyarrow==25.0.1
+
+# ── Compiled C extensions ─────────────────────────────────────────────────────
+cryptography==50.0.0
+cffi==2.1.1
+pycparser==3.0
+greenlet==3.5.5
+psycopg2-binary==2.9.12

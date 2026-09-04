@@ -1,0 +1,31 @@
+# Secrets — never bake into the image
+.env
+
+# Local build artifact — image builds its own via RUN zip
+ingestion.zip
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+.venv/
+
+# Spark local state
+metastore_db/
+derby.log
+
+# Data files
+*.parquet
+*.csv
+*.json
+*.log
+
+# IDE / OS
+.idea/
+.claude/
+.DS_Store
+
+# Git
+.git/
+.gitignore
