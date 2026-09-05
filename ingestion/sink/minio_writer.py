@@ -5,7 +5,7 @@ from ast import literal_eval
 from pyspark.sql import DataFrame, SparkSession
 from pyspark.sql.functions import months, to_date, lit, year, month, days
 
-from ingestion.env.DE_Ingestion_properties import ICEBERG_CATALOG, ICEBERG_DATABASE
+from ingestion.env.DE_Ingestion_properties import ICEBERG_CATALOG, ICEBERG_DATABASE, ICEBERG_DATA_BUCKET, ICEBERG_METADATA_BUCKET
 from ingestion.pyfiles.logger import get_logger
 
 logger = get_logger(__name__)
@@ -24,7 +24,10 @@ def write_to_minio(
     catalog = catalog or ICEBERG_CATALOG
     full_table = f"{catalog}.{database}.{table_name}"
 
-    logger.info("Writing Iceberg table '%s' (mode=%s)", full_table, mode)
+    app_name = args.application_name
+    data_path = f"s3a://{ICEBERG_DATA_BUCKET}/{app_name}"
+    meta_location = f"s3a://{ICEBERG_METADATA_BUCKET}/{app_name}"
+    logger.info("Writing Iceberg table '%s' (mode=%s, data=%s, meta=%s)", full_table, mode, data_path, meta_location)
 
     df = df.withColumn(
         "ingest_date",
@@ -42,7 +45,13 @@ def write_to_minio(
                 lit(v)
             )
 
-    writer = df.writeTo(full_table).using("iceberg").partitionedBy(*d.keys(), days("ingest_date"))
+    writer = (
+        df.writeTo(full_table)
+        .using("iceberg")
+        .option("location", meta_location)
+        .tableProperty("write.data.path", data_path)
+        .partitionedBy(*d.keys(), days("ingest_date"))
+    )
     if mode.strip() == "append":
         writer.append()
     elif mode.strip() == "replace":

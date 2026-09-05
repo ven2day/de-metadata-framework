@@ -31,6 +31,7 @@ services:
       MINIO_ROOT_PASSWORD:         ${MINIO_SECRET_KEY:-minioadmin}
       MINIO_BROWSER_REDIRECT_URL:  ${MINIO_BROWSER_REDIRECT_URL:-http://localhost:9001}
       MINIO_SERVER_URL:            ${MINIO_SERVER_URL:-http://localhost:9000}
+      MINIO_SITE_REGION:           us-east-1
     command: server /data --console-address ":9001"
     ports:
       - "9000:9000"   # S3 API
@@ -58,13 +59,13 @@ services:
       MINIO_ACCESS_KEY:  ${MINIO_ACCESS_KEY:-minioadmin}
       MINIO_SECRET_KEY:  ${MINIO_SECRET_KEY:-minioadmin}
       MINIO_BUCKET:      ${MINIO_BUCKET:-de-data-lake}
-      SOURCE_S3_BUCKET:  ${SOURCE_S3_BUCKET:-de-source}
+      SOURCE_S3_BUCKET:  ${SOURCE_S3_BUCKET:-de-source-data-bucket}
     entrypoint: >
       /bin/sh -c "
         mc alias set local http://minio:9000 $$MINIO_ACCESS_KEY $$MINIO_SECRET_KEY &&
         mc mb --ignore-existing local/$$MINIO_BUCKET &&
         mc mb --ignore-existing local/$$SOURCE_S3_BUCKET &&
-        mc mb --ignore-existing local/de-iceberg-warehouse &&
+        mc mb --ignore-existing local/de-iceberg-warehouse-bucket &&
         mc mb --ignore-existing local/de-metadata-bucket &&
         mc mb --ignore-existing local/de-data-migration-logs &&
         echo 'All buckets ready'

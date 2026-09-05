@@ -10,7 +10,7 @@ SALT_KEY: str = os.getenv("SALT_KEY", "change-me-generate-a-32-char-random-strin
 SOURCE_S3_ENDPOINT: str   = os.getenv("SOURCE_S3_ENDPOINT", "http://127.0.0.1:9000 ")
 SOURCE_S3_ACCESS_KEY: str = os.getenv("SOURCE_S3_ACCESS_KEY", "minioadmin")
 SOURCE_S3_SECRET_KEY: str = os.getenv("SOURCE_S3_SECRET_KEY", "minioadmin")
-SOURCE_S3_BUCKET: str     = os.getenv("SOURCE_S3_BUCKET", "de-source")
+SOURCE_S3_BUCKET: str     = os.getenv("SOURCE_S3_BUCKET", "de-source-data-bucket")
 METADATA_S3_BUCKET: str = os.getenv("METADATA_S3_BUCKET")
 
 # ── MinIO (Sink — S3-compatible) ───────────────────────────────────────────────
@@ -35,7 +35,9 @@ SPARK_APP_NAME: str = os.getenv("SPARK_APP_NAME", "DE-Metadata-Framework")
 SPARK_MASTER: str   = os.getenv("SPARK_MASTER", "local[*]")
 
 # ── Iceberg ────────────────────────────────────────────────────────────────────
-ICEBERG_WAREHOUSE: str = os.getenv("ICEBERG_WAREHOUSE", "s3a://de-iceberg-warehouse/")
+ICEBERG_WAREHOUSE: str        = os.getenv("ICEBERG_WAREHOUSE", "s3a://de-iceberg-warehouse-bucket/")
+ICEBERG_DATA_BUCKET: str      = os.getenv("ICEBERG_DATA_BUCKET", "de-data-lake")
+ICEBERG_METADATA_BUCKET: str  = os.getenv("ICEBERG_METADATA_BUCKET", "de-iceberg-warehouse-bucket")
 ICEBERG_CATALOG: str   = os.getenv("ICEBERG_CATALOG", "minio")
 ICEBERG_DATABASE: str  = os.getenv("ICEBERG_DATABASE", "default")
 

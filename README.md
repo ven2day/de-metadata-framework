@@ -17,7 +17,7 @@ Data flows from external sources through the pipeline into an Iceberg data lake.
   ┌──────────┐      │  ┌────────┐    ┌──────────────────────────┐ │
   │ S3 / MinIO├─────┼─▶│        │    │   Apache Iceberg          │ │  ┌──────────────┐
   │ (raw data)│     │  │        │───▶│   Tables (MinIO)          ├─┼─▶│ BI / Spark   │
-  └──────────┘      │  │        │    │   de-iceberg-warehouse/   │ │  │ query engine │
+  └──────────┘      │  │        │    │ de-iceberg-warehouse-bucket/ │ │  │ query engine │
                     │  │  Spark │    └──────────────────────────┘ │  └──────────────┘
   ┌──────────┐      │  │  ETL   │                                  │
   │ Supabase /├─────┼─▶│  Pipeline   ┌──────────────────────────┐ │
@@ -218,15 +218,14 @@ Data flows from external sources through the pipeline into an Iceberg data lake.
 
 ```
   MinIO
-  ├── de-source/                      ← raw input files (S3 source)
+  ├── de-source-data-bucket/          ← raw input files (S3 source)
   │   └── <folder>/<file>
   ├── de-metadata-bucket/             ← metadata CSV sheets
   │   └── <dataset>_schema.csv
-  ├── de-iceberg-warehouse/           ← Iceberg table data + metadata
-  │   └── <database>/<table>/
-  │       ├── data/  (Parquet files)
-  │       └── metadata/  (Iceberg manifests + snapshots)
-  ├── de-data-lake/                   ← general data lake bucket (sink)
+  ├── de-data-lake/                   ← Iceberg Parquet data files
+  │   └── <application_name>/
+  ├── de-iceberg-warehouse-bucket/    ← Iceberg metadata (manifests + snapshots)
+  │   └── <application_name>/
   └── de-data-migration-logs/         ← per-run pipeline logs
       └── lake/<app-name>/<date>/<app-name>_<date>_<ts>.log
 ```
@@ -352,7 +351,7 @@ MINIO_BROWSER_REDIRECT_URL=https://minio.atestingdomain.info
 SOURCE_S3_ENDPOINT=http://minio:9000
 SOURCE_S3_ACCESS_KEY=your_minio_user
 SOURCE_S3_SECRET_KEY=your_minio_password
-SOURCE_S3_BUCKET=de-source
+SOURCE_S3_BUCKET=de-source-data-bucket
 
 # ── Supabase / PostgreSQL ─────────────────────────────────────────────────────
 SUPABASE_JDBC_URL=jdbc:postgresql://db.<ref>.supabase.co:5432/postgres
@@ -371,7 +370,9 @@ SALT_KEY=your_hmac_salt_key
 SALT_2=your_secondary_salt          # seeded into Vault KV by vault-init
 
 # ── Iceberg ───────────────────────────────────────────────────────────────────
-ICEBERG_WAREHOUSE=s3a://de-iceberg-warehouse/
+ICEBERG_WAREHOUSE=s3a://de-iceberg-warehouse-bucket/
+ICEBERG_DATA_BUCKET=de-data-lake
+ICEBERG_METADATA_BUCKET=de-iceberg-warehouse-bucket
 ICEBERG_CATALOG=minio
 ICEBERG_DATABASE=default
 
@@ -411,7 +412,7 @@ spark.sql.extensions  org.apache.iceberg.spark.extensions.IcebergSparkSessionExt
 
 spark.sql.catalog.minio                        org.apache.iceberg.spark.SparkCatalog
 spark.sql.catalog.minio.type                   hadoop
-spark.sql.catalog.minio.warehouse              s3a://de-iceberg-warehouse/
+spark.sql.catalog.minio.warehouse              s3a://de-iceberg-warehouse-bucket/
 spark.sql.catalog.minio.io-impl                org.apache.iceberg.aws.s3.S3FileIO
 spark.sql.catalog.minio.s3.endpoint            http://127.0.0.1:9000
 spark.sql.catalog.minio.s3.path-style-access   true
@@ -523,7 +524,7 @@ docker compose run --rm pipeline \
   --application-name my_dataset \
   --source-type s3 \
   --ingest-date 2026-01-15 \
-  --source-bucket de-source \
+  --source-bucket de-source-data-bucket \
   --source-key raw/my_dataset/data.parquet \
   --metadata-key metadata/my_dataset_schema.csv \
   --output-database default \
@@ -610,7 +611,7 @@ The pipeline token written by `vault-init` is scoped to exactly these operations
 | `SOURCE_S3_ENDPOINT` | `http://minio:9000` | Source S3 endpoint (internal) |
 | `SOURCE_S3_ACCESS_KEY` | `minioadmin` | Source access key |
 | `SOURCE_S3_SECRET_KEY` | `minioadmin` | Source secret key |
-| `SOURCE_S3_BUCKET` | `de-source` | Source bucket name |
+| `SOURCE_S3_BUCKET` | `de-source-data-bucket` | Source bucket name |
 | `SUPABASE_JDBC_URL` | — | PostgreSQL JDBC connection string (direct host) |
 | `AUTH_DATABASE_URL` | — | PostgreSQL pooler URL for auth DB (IPv4, preferred over SUPABASE_JDBC_URL) |
 | `SUPABASE_DB_USER` | `postgres` | Database user |
@@ -620,7 +621,9 @@ The pipeline token written by `vault-init` is scoped to exactly these operations
 | `VAULT_PATH` | `encryption/pii` | KV path for PII secrets |
 | `SALT_KEY` | — | HMAC-SHA256 salt for hashing |
 | `SALT_2` | — | Secondary salt seeded into Vault KV |
-| `ICEBERG_WAREHOUSE` | `s3a://de-iceberg-warehouse/` | Iceberg warehouse location |
+| `ICEBERG_WAREHOUSE` | `s3a://de-iceberg-warehouse-bucket/` | Iceberg catalog warehouse root |
+| `ICEBERG_DATA_BUCKET` | `de-data-lake` | Bucket for Iceberg Parquet data files |
+| `ICEBERG_METADATA_BUCKET` | `de-iceberg-warehouse-bucket` | Bucket for Iceberg table metadata |
 | `ICEBERG_CATALOG` | `minio` | Iceberg catalog name |
 | `ICEBERG_DATABASE` | `default` | Default Iceberg namespace |
 | `LOG_S3_BUCKET` | `de-data-migration-logs` | Bucket for pipeline logs |
