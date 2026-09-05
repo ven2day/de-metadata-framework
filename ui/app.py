@@ -2,30 +2,44 @@ import io
 import os
 import sys
 from flask import Flask, render_template, request, Response, stream_with_context, send_file, jsonify
+from flask_login import login_required, current_user
 
 app = Flask(__name__)
+app.secret_key = os.environ["FLASK_SECRET_KEY"]
 
 PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
-
 sys.path.insert(0, PROJECT_ROOT)
+
 from ingestion.env.DE_Ingestion_properties import (
     MINIO_ENDPOINT, MINIO_ACCESS_KEY, MINIO_SECRET_KEY, LOG_S3_BUCKET, VAULT_ADDR,
 )
 
-# Derive Docker resource names from the compose project name.
-# docker compose names images/networks/volumes as {project}-{service} / {project}_{resource}.
-_PROJECT = os.environ.get("COMPOSE_PROJECT_NAME", "de-metadata-framework")
+# ── Extensions ─────────────────────────────────────────────────────────────────
+from ui.extensions import csrf, login_manager, limiter
+
+csrf.init_app(app)
+login_manager.init_app(app)
+limiter.init_app(app)
+
+@login_manager.user_loader
+def load_user(user_id: str):
+    from ui.models import User
+    return User.get_by_id(int(user_id))
+
+# ── Auth blueprint ─────────────────────────────────────────────────────────────
+from ui.auth import auth_bp
+app.register_blueprint(auth_bp)
+
+# ── Docker resource names ──────────────────────────────────────────────────────
+_PROJECT          = os.environ.get("COMPOSE_PROJECT_NAME", "de-metadata-framework")
 _PIPELINE_IMAGE   = f"{_PROJECT}-pipeline"
 _COMPOSE_NETWORK  = f"{_PROJECT}_de-net"
 _VAULT_VOL        = f"{_PROJECT}_vault_secrets"
 
-# Env vars forwarded from the UI container into the pipeline container.
-# MINIO_ENDPOINT / SOURCE_S3_ENDPOINT stay as Docker-internal addresses.
 _SKIP_ENV = {"FLASK_DEBUG", "FLASK_ENV", "WERKZEUG_RUN_MAIN", "HOSTNAME"}
 
 
 def _build_pipeline_args(form) -> list[str]:
-    """Return the pipeline.py CLI arguments (entrypoint.sh prepends spark-submit)."""
     source_type = form.get("source_type", "s3")
     args = [
         "--application-name", form["application_name"],
@@ -50,11 +64,13 @@ def _build_pipeline_args(form) -> list[str]:
 
 
 @app.route("/")
+@login_required
 def index():
     return render_template("index.html")
 
 
 @app.route("/connectivity")
+@login_required
 def connectivity():
     import boto3
     import requests as _req
@@ -76,7 +92,6 @@ def connectivity():
 
     try:
         r = _req.get(f"{VAULT_ADDR}/v1/sys/health", timeout=3)
-        # 200=unsealed, 503=sealed (still reachable), 429=standby
         results["vault"] = "ok" if r.status_code in (200, 429, 503) else f"error: HTTP {r.status_code}"
     except Exception as exc:
         results["vault"] = f"error: {exc}"
@@ -85,6 +100,7 @@ def connectivity():
 
 
 @app.route("/run", methods=["POST"])
+@login_required
 def run():
     pipeline_args = _build_pipeline_args(request.form)
 
@@ -93,10 +109,6 @@ def run():
         container = None
         try:
             client = _docker.DockerClient(base_url="unix:///var/run/docker.sock")
-
-            # Forward all env vars from this container into the pipeline container,
-            # excluding Flask-specific noise. MINIO/SOURCE endpoints keep their
-            # Docker-internal values set by docker-compose.
             env = {k: v for k, v in os.environ.items() if k not in _SKIP_ENV}
 
             container = client.containers.run(
@@ -137,6 +149,7 @@ def _find_log_key(client, app_name: str, ingest_date: str, log_folder: str) -> s
 
 
 @app.route("/download-log")
+@login_required
 def download_log():
     import boto3
 
@@ -162,5 +175,8 @@ def download_log():
 
 
 if __name__ == "__main__":
+    from ui.db import init_schema
+    init_schema()
+
     debug = os.environ.get("FLASK_DEBUG", "0") == "1"
     app.run(debug=debug, host="0.0.0.0", port=5000, threaded=True)

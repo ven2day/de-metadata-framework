@@ -8,12 +8,14 @@
 #   vault-init   — one-shot Vault bootstrapper (unseals + seeds secrets)
 #   ui           — Flask web UI (always running)
 #   pipeline     — spark-submit runner (on-demand via `docker-compose run`)
+#   cloudflared  — Cloudflare Tunnel (routes atestingdomain.info → local services)
 #
 # First-time setup:
 #   1. Add SALT_2 and SUPABASE_DB_PASSWORD_PLAIN to .env
-#   2. docker-compose up -d minio vault      # start infrastructure
-#   3. docker-compose run --rm vault-init    # bootstrap Vault once
-#   4. docker-compose up -d ui              # start the UI
+#   2. Add CLOUDFLARE_TUNNEL_TOKEN to .env (from Cloudflare Zero Trust dashboard)
+#   3. docker-compose up -d minio vault      # start infrastructure
+#   4. docker-compose run --rm vault-init    # bootstrap Vault once
+#   5. docker-compose up -d ui              # start the UI + tunnel
 #
 # Subsequent starts: docker-compose up -d
 
@@ -25,8 +27,10 @@ services:
     container_name: minio
     restart: unless-stopped
     environment:
-      MINIO_ROOT_USER:     ${MINIO_ACCESS_KEY:-minioadmin}
-      MINIO_ROOT_PASSWORD: ${MINIO_SECRET_KEY:-minioadmin}
+      MINIO_ROOT_USER:             ${MINIO_ACCESS_KEY:-minioadmin}
+      MINIO_ROOT_PASSWORD:         ${MINIO_SECRET_KEY:-minioadmin}
+      MINIO_BROWSER_REDIRECT_URL:  ${MINIO_BROWSER_REDIRECT_URL:-http://localhost:9001}
+      MINIO_SERVER_URL:            ${MINIO_SERVER_URL:-http://localhost:9000}
     command: server /data --console-address ":9001"
     ports:
       - "9000:9000"   # S3 API
@@ -82,7 +86,7 @@ services:
           "storage":  {"file": {"path": "/vault/data"}},
           "listener": [{"tcp": {"address": "0.0.0.0:8200", "tls_disable": "true"}}],
           "ui":       true,
-          "api_addr": "http://0.0.0.0:8200"
+          "api_addr": "https://vault.atestingdomain.info"
         }
     command: server
     ports:
@@ -145,6 +149,18 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock
     ports:
       - "5001:5000"
+    networks:
+      - de-net
+
+  # ── Cloudflare Tunnel — expose services via atestingdomain.info ────────────
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    container_name: cloudflared
+    restart: unless-stopped
+    command: --loglevel info tunnel --no-autoupdate --protocol http2 run --token ${CLOUDFLARE_TUNNEL_TOKEN}
+    depends_on:
+      - ui
+      - minio
     networks:
       - de-net
 

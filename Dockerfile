@@ -70,7 +70,8 @@ COPY ui/ ui/
 RUN cd /app && zip -r ingestion.zip ingestion/
 
 # ── Docker helpers ────────────────────────────────────────────────────────────
-COPY docker/vault_init.py    docker/vault_init.py
+COPY docker/vault_init.py      docker/vault_init.py
+COPY docker/seed_root_user.py  docker/seed_root_user.py
 COPY docker/entrypoint.sh    /entrypoint.sh
 COPY docker/ui-entrypoint.sh /ui-entrypoint.sh
 RUN chmod +x /entrypoint.sh /ui-entrypoint.sh

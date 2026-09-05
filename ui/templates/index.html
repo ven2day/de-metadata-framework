@@ -4,6 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>DE Metadata Pipeline</title>
+  <meta name="csrf-token" content="{{ csrf_token() }}">
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
@@ -330,10 +331,19 @@
     <!-- Header -->
     <div class="page-header">
       <h1>DE Metadata <span>Pipeline</span></h1>
-      <button class="btn-toggle-log" id="log-toggle-btn" onclick="toggleLogPanel()">
-        <span class="indicator" id="log-indicator"></span>
-        Live Logs
-      </button>
+      <div style="display:flex;align-items:center;gap:8px;">
+        {% if current_user.is_root %}
+        <a href="{{ url_for('auth.users') }}" class="btn-toggle-log" style="text-decoration:none">Users</a>
+        {% endif %}
+        <button class="btn-toggle-log" id="log-toggle-btn" onclick="toggleLogPanel()">
+          <span class="indicator" id="log-indicator"></span>
+          Live Logs
+        </button>
+        <form method="POST" action="{{ url_for('auth.logout') }}" style="margin:0">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+          <button type="submit" class="btn-toggle-log">Logout</button>
+        </form>
+      </div>
     </div>
 
     <!-- Connectivity status -->
@@ -351,6 +361,7 @@
     </div>
 
     <form id="pipeline-form">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
 
       <!-- Source -->
       <div class="card">

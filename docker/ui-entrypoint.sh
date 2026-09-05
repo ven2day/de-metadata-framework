@@ -19,4 +19,7 @@ if [ -f "/vault/secrets/supabase_db_password_ciphertext" ]; then
     export SUPABASE_DB_PASSWORD
 fi
 
+# 4. Seed root user (no-op if already exists)
+python3 /app/docker/seed_root_user.py
+
 exec python3 /app/ui/app.py
