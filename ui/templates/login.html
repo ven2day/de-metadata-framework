@@ -8,15 +8,15 @@
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
     :root {
-      --bg:       #f7f7f8;
+      --bg:       #f2ede6;
       --surface:  #ffffff;
-      --border:   #e2e2e5;
+      --border:   #e8e2d9;
       --text:     #1a1a1a;
-      --muted:    #6b7280;
-      --accent:   #2563eb;
-      --accent-h: #1d4ed8;
+      --muted:    #8a8078;
+      --amber:    #e9a825;
+      --amber-h:  #d4961e;
       --red:      #dc2626;
-      --radius:   6px;
+      --radius:   10px;
     }
 
     body {
@@ -26,95 +26,336 @@
       color: var(--text);
       min-height: 100vh;
       display: flex;
-      align-items: center;
-      justify-content: center;
-      padding: 24px 16px;
+      flex-direction: column;
+      overflow: hidden;
+      position: relative;
     }
 
-    .login-wrap { width: 100%; max-width: 360px; }
+    /* ── Top nav bar ─────────────────────────────────────── */
+    .top-bar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 18px 32px;
+      position: relative;
+      z-index: 10;
+    }
+    .top-brand {
+      font-size: 15px;
+      font-weight: 700;
+      letter-spacing: -0.4px;
+      color: var(--text);
+    }
+    .top-brand span { color: var(--amber); }
+    .top-sub {
+      font-size: 11px;
+      color: var(--muted);
+      margin-top: 2px;
+    }
+    .top-badge {
+      font-size: 11px;
+      font-weight: 500;
+      color: var(--muted);
+      background: rgba(0,0,0,0.05);
+      border-radius: 20px;
+      padding: 5px 14px;
+      letter-spacing: 0.2px;
+    }
 
-    .brand {
+    /* ── Decorative background ───────────────────────────── */
+    .deco {
+      position: absolute;
+      pointer-events: none;
+      z-index: 1;
+    }
+
+    /* Amber polka-dot block */
+    .deco-dots {
+      width: 88px; height: 88px;
+      background: radial-gradient(circle, #e9a825 2px, transparent 2px);
+      background-size: 14px 14px;
+      opacity: 0.55;
+    }
+    .deco-dots-1 { top: 140px; left: 52px; }
+    .deco-dots-2 { bottom: 100px; right: 64px; transform: rotate(15deg); }
+
+    /* Outline card shapes */
+    .deco-card {
+      border: 2px solid rgba(0,0,0,0.12);
+      border-radius: 8px;
+    }
+    .deco-card-1 { width: 88px; height: 62px; top: 200px; left: 140px; }
+    .deco-card-2 { width: 64px; height: 44px; bottom: 160px; left: 100px; }
+    .deco-card-3 { width: 72px; height: 50px; top: 170px; right: 130px; }
+
+    /* Inner line inside deco-card */
+    .deco-card::after {
+      content: '';
+      display: block;
+      margin: 12px 10px 0;
+      height: 2px;
+      background: rgba(0,0,0,0.1);
+      border-radius: 2px;
+      box-shadow: 0 6px 0 rgba(0,0,0,0.07);
+    }
+
+    /* Small circles */
+    .deco-circle {
+      border-radius: 50%;
+      border: 2px solid rgba(0,0,0,0.12);
+    }
+    .deco-circle-1 { width: 18px; height: 18px; top: 300px; left: 34px; }
+    .deco-circle-2 { width: 10px; height: 10px; top: 120px; right: 200px; }
+    .deco-circle-3 { width: 14px; height: 14px; bottom: 200px; right: 180px; }
+
+    /* Wavy line SVG */
+    .deco-wave {
+      opacity: 0.18;
+    }
+    .deco-wave-1 { top: 240px; left: 30px; }
+    .deco-wave-2 { top: 200px; right: 50px; transform: scaleX(-1); }
+
+    /* DE pipeline flavor text floating in bg */
+    .deco-text {
+      font-size: 11px;
+      font-weight: 500;
+      color: rgba(0,0,0,0.13);
+      letter-spacing: 0.3px;
+      white-space: nowrap;
+    }
+    .deco-text-1 { top: 108px; left: 48px; }
+    .deco-text-2 { bottom: 140px; left: 60px; transform: rotate(-2deg); }
+    .deco-text-3 { top: 130px; right: 44px; }
+    .deco-text-4 { bottom: 120px; right: 48px; transform: rotate(1deg); }
+
+    /* Pipeline step strip in background */
+    .deco-steps {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      opacity: 0.12;
+    }
+    .deco-step-node {
+      width: 26px; height: 26px;
+      border: 2px solid var(--text);
+      border-radius: 50%;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 8px; font-weight: 700;
+    }
+    .deco-step-line {
+      width: 20px; height: 2px;
+      background: var(--text);
+      border-radius: 1px;
+    }
+    .deco-steps-wrap { bottom: 60px; left: 50%; transform: translateX(-50%); }
+
+    /* ── Main content area ───────────────────────────────── */
+    .page-body {
+      flex: 1;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 20px 16px 40px;
+      position: relative;
+      z-index: 10;
+    }
+
+    /* ── Login card ──────────────────────────────────────── */
+    .login-card {
+      background: var(--surface);
+      border-radius: 20px;
+      box-shadow: 0 8px 40px rgba(0,0,0,0.10), 0 2px 8px rgba(0,0,0,0.06);
+      padding: 36px 36px 30px;
+      width: 100%;
+      max-width: 400px;
+    }
+
+    .login-heading {
       text-align: center;
       margin-bottom: 24px;
     }
-    .brand h1 { font-size: 18px; font-weight: 600; letter-spacing: -0.3px; }
-    .brand h1 span { color: var(--accent); }
-    .brand p { font-size: 12px; color: var(--muted); margin-top: 4px; }
-
-    .card {
-      background: var(--surface);
-      border: 1px solid var(--border);
-      border-radius: var(--radius);
-      padding: 28px 28px 24px;
+    .login-heading h2 {
+      font-size: 24px;
+      font-weight: 700;
+      letter-spacing: -0.5px;
+      color: var(--text);
+      margin-bottom: 8px;
+    }
+    .login-heading p {
+      font-size: 13px;
+      color: var(--muted);
+      line-height: 1.55;
+      max-width: 280px;
+      margin: 0 auto;
     }
 
-    .field { display: flex; flex-direction: column; gap: 5px; margin-bottom: 14px; }
-    label { font-size: 12px; font-weight: 500; color: var(--muted); }
-
-    input[type="text"],
-    input[type="password"] {
-      width: 100%; padding: 8px 10px;
-      border: 1px solid var(--border);
-      border-radius: var(--radius);
-      font-size: 13px; font-family: inherit;
-      color: var(--text); background: var(--surface);
-      outline: none; transition: border-color 0.15s;
-    }
-    input:focus { border-color: var(--accent); }
-
+    /* ── Error box ───────────────────────────────────────── */
     .error-box {
       background: #fef2f2;
       border: 1px solid #fecaca;
       border-radius: var(--radius);
-      padding: 10px 12px;
+      padding: 10px 14px;
       font-size: 12px;
       color: var(--red);
-      margin-bottom: 16px;
+      margin-bottom: 18px;
+      text-align: center;
     }
 
-    .btn-submit {
-      width: 100%; padding: 10px;
-      background: var(--accent); color: #fff;
-      border: none; border-radius: var(--radius);
-      font-size: 13px; font-weight: 600;
-      cursor: pointer; transition: background 0.15s;
-      margin-top: 4px;
+    /* ── Form fields ─────────────────────────────────────── */
+    .field { margin-bottom: 14px; }
+
+    input[type="text"],
+    input[type="password"] {
+      width: 100%;
+      padding: 11px 14px;
+      border: 1.5px solid var(--border);
+      border-radius: var(--radius);
+      font-size: 13px;
+      font-family: inherit;
+      color: var(--text);
+      background: #faf8f5;
+      outline: none;
+      transition: border-color 0.15s, box-shadow 0.15s;
     }
-    .btn-submit:hover { background: var(--accent-h); }
+    input::placeholder { color: #b0a89e; }
+    input:focus {
+      border-color: var(--amber);
+      background: #fff;
+      box-shadow: 0 0 0 3px rgba(233,168,37,0.12);
+    }
+
+    /* ── Sign-in button ──────────────────────────────────── */
+    .btn-submit {
+      width: 100%;
+      padding: 12px;
+      background: var(--amber);
+      color: #fff;
+      border: none;
+      border-radius: var(--radius);
+      font-size: 13px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: background 0.15s, box-shadow 0.15s, transform 0.1s;
+      margin-top: 8px;
+      box-shadow: 0 3px 10px rgba(233,168,37,0.35);
+      letter-spacing: 0.1px;
+    }
+    .btn-submit:hover {
+      background: var(--amber-h);
+      box-shadow: 0 5px 18px rgba(233,168,37,0.45);
+      transform: translateY(-1px);
+    }
+    .btn-submit:active { transform: translateY(0); }
+
+    /* ── Footer ──────────────────────────────────────────── */
+    .page-footer {
+      text-align: center;
+      font-size: 11px;
+      color: rgba(0,0,0,0.25);
+      padding: 0 0 20px;
+      position: relative;
+      z-index: 10;
+    }
   </style>
 </head>
 <body>
-<div class="login-wrap">
 
-  <div class="brand">
-    <h1>DE Metadata <span>Pipeline</span></h1>
-    <p>Sign in to continue</p>
+  <!-- ── Decorative background elements ───────────────────── -->
+
+  <!-- Polka dots -->
+  <div class="deco deco-dots deco-dots-1"></div>
+  <div class="deco deco-dots deco-dots-2"></div>
+
+  <!-- Outline cards -->
+  <div class="deco deco-card deco-card-1"></div>
+  <div class="deco deco-card deco-card-2"></div>
+  <div class="deco deco-card deco-card-3"></div>
+
+  <!-- Circles -->
+  <div class="deco deco-circle deco-circle-1"></div>
+  <div class="deco deco-circle deco-circle-2"></div>
+  <div class="deco deco-circle deco-circle-3"></div>
+
+  <!-- Wavy lines -->
+  <svg class="deco deco-wave deco-wave-1" width="80" height="24" viewBox="0 0 80 24" fill="none">
+    <path d="M0 12 Q10 4 20 12 Q30 20 40 12 Q50 4 60 12 Q70 20 80 12" stroke="#1a1a1a" stroke-width="2" fill="none" stroke-linecap="round"/>
+  </svg>
+  <svg class="deco deco-wave deco-wave-2" width="80" height="24" viewBox="0 0 80 24" fill="none">
+    <path d="M0 12 Q10 4 20 12 Q30 20 40 12 Q50 4 60 12 Q70 20 80 12" stroke="#1a1a1a" stroke-width="2" fill="none" stroke-linecap="round"/>
+  </svg>
+
+  <!-- DE pipeline flavor text -->
+  <div class="deco deco-text deco-text-1">Ingest → Validate → Transform → Deliver</div>
+  <div class="deco deco-text deco-text-2">847 GB processed · 12 active pipelines · 0 schema violations</div>
+  <div class="deco deco-text deco-text-3">Iceberg · Spark · MinIO · Vault</div>
+  <div class="deco deco-text deco-text-4">Schema-validated · PII-masked · Partition-optimised</div>
+
+  <!-- Pipeline step strip -->
+  <div class="deco deco-steps deco-steps-wrap">
+    <div class="deco-step-node">1</div>
+    <div class="deco-step-line"></div>
+    <div class="deco-step-node">2</div>
+    <div class="deco-step-line"></div>
+    <div class="deco-step-node">3</div>
+    <div class="deco-step-line"></div>
+    <div class="deco-step-node">4</div>
+    <div class="deco-step-line"></div>
+    <div class="deco-step-node">5</div>
+    <div class="deco-step-line"></div>
+    <div class="deco-step-node">6</div>
+    <div class="deco-step-line"></div>
+    <div class="deco-step-node">7</div>
+    <div class="deco-step-line"></div>
+    <div class="deco-step-node">8</div>
   </div>
 
-  <div class="card">
-    {% if error %}
-    <div class="error-box">{{ error }}</div>
-    {% endif %}
-
-    <form method="POST" action="{{ url_for('auth.login') }}">
-      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-
-      <div class="field">
-        <label for="username">Username</label>
-        <input type="text" id="username" name="username"
-               autocomplete="username" autofocus required />
-      </div>
-
-      <div class="field">
-        <label for="password">Password</label>
-        <input type="password" id="password" name="password"
-               autocomplete="current-password" required />
-      </div>
-
-      <button type="submit" class="btn-submit">Sign in</button>
-    </form>
+  <!-- ── Top bar ─────────────────────────────────────────── -->
+  <div class="top-bar">
+    <div>
+      <div class="top-brand">DE Metadata <span>Pipeline</span></div>
+      <div class="top-sub">Metadata-driven ingestion framework</div>
+    </div>
+    <div class="top-badge">Enterprise · v1.0</div>
   </div>
 
-</div>
+  <!-- ── Login card ──────────────────────────────────────── -->
+  <div class="page-body">
+    <div class="login-card">
+
+      <div class="login-heading">
+        <h2>Pipeline Login</h2>
+        <p>Hey, enter your credentials to access the data engineering control plane</p>
+      </div>
+
+      {% if error %}
+      <div class="error-box">{{ error }}</div>
+      {% endif %}
+
+      <form method="POST" action="{{ url_for('auth.login') }}">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+
+        <div class="field">
+          <input type="text" id="username" name="username"
+                 placeholder="Username"
+                 autocomplete="username" autofocus required />
+        </div>
+
+        <div class="field">
+          <input type="password" id="password" name="password"
+                 placeholder="Password"
+                 autocomplete="current-password" required />
+        </div>
+
+        <button type="submit" class="btn-submit">Sign In</button>
+      </form>
+
+    </div>
+  </div>
+
+  <!-- ── Footer ─────────────────────────────────────────── -->
+  <div class="page-footer">
+    © 2026 DE Metadata Framework &nbsp;·&nbsp; Internal Use Only
+  </div>
+
 </body>
 </html>

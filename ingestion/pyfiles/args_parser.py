@@ -144,6 +144,9 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = build_parser()
     args = parser.parse_args(argv)
 
+    # Normalise application name to lowercase immediately
+    args.application_name = args.application_name.lower().replace("-", "_").replace(" ", "_")
+
     # Cross-argument validation
     if args.source_type == "s3" and not args.source_key:
         parser.error("--source-key is required when --source-type=s3")
@@ -152,8 +155,6 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 
     # Derive output table name from application name if not explicitly provided
     if not args.output_table_name:
-        args.output_table_name = (
-            args.application_name.lower().replace("-", "_").replace(" ", "_")
-        )
+        args.output_table_name = args.application_name
 
     return args

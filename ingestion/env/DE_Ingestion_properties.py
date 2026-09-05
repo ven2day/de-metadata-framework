@@ -41,6 +41,11 @@ ICEBERG_METADATA_BUCKET: str  = os.getenv("ICEBERG_METADATA_BUCKET", "de-iceberg
 ICEBERG_CATALOG: str   = os.getenv("ICEBERG_CATALOG", "minio")
 ICEBERG_DATABASE: str  = os.getenv("ICEBERG_DATABASE", "default")
 
+# ── Medallion layers ───────────────────────────────────────────────────────────
+LAKE_DATABASE: str      = os.getenv("LAKE_DATABASE",      "de_lake")
+BRONZE_DATABASE: str    = os.getenv("BRONZE_DATABASE",    "de_bronze")
+BRONZE_DATA_BUCKET: str = os.getenv("BRONZE_DATA_BUCKET", "de-data-bronze")
+
 # ── Logging ────────────────────────────────────────────────────────────────────
 LOG_S3_BUCKET: str = os.getenv("LOG_S3_BUCKET", "de-data-migration-logs")
 

@@ -65,9 +65,10 @@ RUN --mount=type=cache,target=/root/.spark-jars-cache \
     sed -i 's|^spark\.jars\.packages|# spark.jars.packages|' /app/conf/spark-defaults.conf
 
 # ── Application code ──────────────────────────────────────────────────────────
-COPY ingestion/ ingestion/
-COPY ui/ ui/
-RUN cd /app && zip -r ingestion.zip ingestion/
+COPY ingestion/    ingestion/
+COPY bronze_layer/ bronze_layer/
+COPY ui/           ui/
+RUN cd /app && zip -r ingestion.zip ingestion/ && zip -r bronze_layer.zip bronze_layer/
 
 # ── Docker helpers ────────────────────────────────────────────────────────────
 COPY docker/vault_init.py      docker/vault_init.py

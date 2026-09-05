@@ -12,6 +12,7 @@ sys.path.insert(0, PROJECT_ROOT)
 
 from ingestion.env.DE_Ingestion_properties import (
     MINIO_ENDPOINT, MINIO_ACCESS_KEY, MINIO_SECRET_KEY, LOG_S3_BUCKET, VAULT_ADDR,
+    SOURCE_S3_ENDPOINT, SOURCE_S3_ACCESS_KEY, SOURCE_S3_SECRET_KEY, METADATA_S3_BUCKET,
 )
 
 # ── Extensions ─────────────────────────────────────────────────────────────────
@@ -137,6 +138,113 @@ def run():
                     pass
 
     return Response(stream_with_context(generate()), mimetype="text/plain")
+
+
+@app.route("/list-bucket-keys")
+@login_required
+def list_bucket_keys():
+    import boto3
+    bucket = request.args.get("bucket", "").strip()
+    prefix = request.args.get("prefix", "")
+    if not bucket:
+        return jsonify([])
+    client = boto3.client(
+        "s3",
+        endpoint_url=(SOURCE_S3_ENDPOINT or "").strip(),
+        aws_access_key_id=SOURCE_S3_ACCESS_KEY,
+        aws_secret_access_key=SOURCE_S3_SECRET_KEY,
+    )
+    try:
+        resp = client.list_objects_v2(Bucket=bucket, Prefix=prefix, MaxKeys=500)
+        keys = [obj["Key"] for obj in resp.get("Contents", [])]
+    except Exception:
+        return jsonify([])
+    return jsonify(keys)
+
+
+@app.route("/list-metadata-keys")
+@login_required
+def list_metadata_keys():
+    import boto3
+    meta_bucket = (METADATA_S3_BUCKET or "de-metadata-bucket").strip()
+    client = boto3.client(
+        "s3",
+        endpoint_url=MINIO_ENDPOINT,
+        aws_access_key_id=MINIO_ACCESS_KEY,
+        aws_secret_access_key=MINIO_SECRET_KEY,
+    )
+    try:
+        resp = client.list_objects_v2(Bucket=meta_bucket, MaxKeys=500)
+        keys = [obj["Key"] for obj in resp.get("Contents", []) if obj["Key"].lower().endswith(".csv")]
+    except Exception:
+        return jsonify([])
+    return jsonify(keys)
+
+
+@app.route("/log-history")
+@login_required
+def log_history():
+    import boto3
+    from collections import defaultdict
+
+    app_name   = request.args.get("app_name", "").strip()
+    log_folder = request.args.get("log_folder", "lake")
+    if not app_name:
+        return jsonify([])
+
+    client = boto3.client(
+        "s3",
+        endpoint_url=MINIO_ENDPOINT,
+        aws_access_key_id=MINIO_ACCESS_KEY,
+        aws_secret_access_key=MINIO_SECRET_KEY,
+    )
+    try:
+        resp    = client.list_objects_v2(Bucket=LOG_S3_BUCKET, Prefix=f"{log_folder}/{app_name}/")
+        objects = resp.get("Contents", [])
+    except Exception:
+        return jsonify([])
+
+    by_date = defaultdict(list)
+    for obj in objects:
+        parts = obj["Key"].split("/")
+        if len(parts) >= 3:
+            by_date[parts[2]].append(obj)
+
+    runs = []
+    for date in sorted(by_date.keys(), reverse=True):
+        entries = sorted(by_date[date], key=lambda o: o["LastModified"])
+        date_runs = [
+            {
+                "label":   f"{app_name}_{date}__attempt_{i}",
+                "key":     obj["Key"],
+                "date":    date,
+                "attempt": i,
+                "size":    obj["Size"],
+            }
+            for i, obj in enumerate(entries, 1)
+        ]
+        runs.extend(reversed(date_runs))
+    return jsonify(runs)
+
+
+@app.route("/view-log")
+@login_required
+def view_log():
+    import boto3
+
+    key = request.args.get("key", "")
+    if not key:
+        return ("", 400)
+    client = boto3.client(
+        "s3",
+        endpoint_url=MINIO_ENDPOINT,
+        aws_access_key_id=MINIO_ACCESS_KEY,
+        aws_secret_access_key=MINIO_SECRET_KEY,
+    )
+    buf = io.BytesIO()
+    client.download_fileobj(LOG_S3_BUCKET, key, buf)
+    buf.seek(0)
+    return Response(buf.read().decode("utf-8", errors="replace"), mimetype="text/plain")
 
 
 def _find_log_key(client, app_name: str, ingest_date: str, log_folder: str) -> str:

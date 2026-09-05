@@ -9,18 +9,21 @@
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
     :root {
-      --bg:       #f7f7f8;
-      --surface:  #ffffff;
-      --border:   #e2e2e5;
-      --text:     #1a1a1a;
-      --muted:    #6b7280;
-      --accent:   #2563eb;
-      --accent-h: #1d4ed8;
-      --green:    #16a34a;
-      --red:      #dc2626;
-      --amber:    #d97706;
-      --radius:   6px;
-      --mono:     "JetBrains Mono", "Fira Mono", ui-monospace, monospace;
+      --bg:        #f2ede6;
+      --surface:   #ffffff;
+      --border:    #e8e2d9;
+      --text:      #1a1a1a;
+      --muted:     #8a8078;
+      --amber:     #e9a825;
+      --amber-h:   #d4961e;
+      --amber-s:   rgba(233,168,37,0.12);
+      --green:     #16a34a;
+      --red:       #dc2626;
+      --accent:    #2563eb;
+      --radius:    10px;
+      --card-r:    16px;
+      --shadow:    0 2px 14px rgba(180,150,80,0.09), 0 1px 3px rgba(0,0,0,0.05);
+      --mono:      "JetBrains Mono", "Fira Mono", ui-monospace, monospace;
     }
 
     body {
@@ -29,177 +32,341 @@
       background: var(--bg);
       color: var(--text);
       min-height: 100vh;
-      padding: 24px 16px;
+      display: flex;
+      flex-direction: column;
     }
 
-    /* ── Two-column page layout ── */
+    /* ── Decorative background ── */
+    .deco { position: fixed; pointer-events: none; z-index: 0; }
+    .deco-dots {
+      width: 80px; height: 80px;
+      background: radial-gradient(circle, #e9a825 2px, transparent 2px);
+      background-size: 13px 13px;
+      opacity: 0.3;
+    }
+    .deco-dots-1 { top: 120px; left: 30px; }
+    .deco-dots-2 { bottom: 80px; right: 40px; }
+    .deco-card {
+      border: 2px solid rgba(0,0,0,0.08);
+      border-radius: 8px;
+    }
+    .deco-card::after {
+      content: '';
+      display: block;
+      margin: 10px 8px 0;
+      height: 2px;
+      background: rgba(0,0,0,0.07);
+      border-radius: 1px;
+      box-shadow: 0 5px 0 rgba(0,0,0,0.05);
+    }
+    .deco-card-1 { width: 72px; height: 52px; top: 200px; left: 120px; }
+    .deco-card-2 { width: 58px; height: 40px; bottom: 140px; left: 80px; }
+    .deco-card-3 { width: 64px; height: 46px; top: 160px; right: 110px; }
+    .deco-circle {
+      border-radius: 50%;
+      border: 2px solid rgba(0,0,0,0.09);
+    }
+    .deco-circle-1 { width: 16px; height: 16px; top: 280px; left: 22px; }
+    .deco-circle-2 { width: 10px; height: 10px; top: 110px; right: 180px; }
+    .deco-circle-3 { width: 12px; height: 12px; bottom: 180px; right: 160px; }
+    .deco-wave { opacity: 0.13; }
+    .deco-wave-1 { top: 230px; left: 20px; }
+    .deco-wave-2 { top: 190px; right: 40px; transform: scaleX(-1); }
+
+    /* ── Top bar ── */
+    .top-bar {
+      position: relative;
+      z-index: 20;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 16px 28px;
+      background: rgba(242,237,230,0.85);
+      backdrop-filter: blur(8px);
+      border-bottom: 1px solid rgba(0,0,0,0.07);
+    }
+    .top-brand-group { display: flex; align-items: center; gap: 10px; }
+    .logo-mark {
+      width: 28px; height: 28px;
+      background: var(--amber);
+      border-radius: 7px;
+      flex-shrink: 0;
+      display: flex; align-items: center; justify-content: center;
+    }
+    .logo-mark::after {
+      content: '';
+      width: 11px; height: 11px;
+      border: 2.5px solid rgba(255,255,255,0.9);
+      border-radius: 3px;
+    }
+    .top-brand { font-size: 15px; font-weight: 700; letter-spacing: -0.4px; }
+    .top-brand span { color: var(--amber); }
+    .top-sub { font-size: 11px; color: var(--muted); margin-top: 1px; }
+
+    .top-actions { display: flex; align-items: center; gap: 8px; }
+
+    .conn-item { display: flex; align-items: center; gap: 5px; margin-right: 6px; }
+    .conn-dot {
+      width: 7px; height: 7px; border-radius: 50%;
+      background: var(--border); flex-shrink: 0;
+      transition: background 0.3s;
+    }
+    .conn-dot.ok      { background: var(--green); }
+    .conn-dot.err     { background: var(--red); }
+    .conn-dot.pinging { background: var(--amber); animation: blink 1s infinite; }
+    .conn-name { font-size: 11px; color: var(--muted); }
+    .conn-name.ok  { color: var(--text); }
+    .conn-name.err { color: var(--red); }
+    .conn-divider { width: 1px; height: 16px; background: var(--border); margin: 0 4px; }
+
+    .top-btn {
+      display: flex; align-items: center; gap: 5px;
+      padding: 6px 13px;
+      border: 1.5px solid var(--border);
+      border-radius: 20px;
+      background: var(--surface);
+      font-size: 12px; font-weight: 500;
+      color: var(--muted); cursor: pointer;
+      text-decoration: none;
+      transition: border-color 0.15s, color 0.15s, box-shadow 0.15s;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.04);
+    }
+    .top-btn:hover { border-color: var(--amber); color: var(--amber); }
+    .top-btn.active { border-color: var(--amber); color: var(--amber); background: rgba(233,168,37,.06); }
+    .top-btn .indicator {
+      width: 6px; height: 6px; border-radius: 50%;
+      background: var(--muted); transition: background 0.2s;
+    }
+    .top-btn.running .indicator { background: var(--amber); animation: blink 1s infinite; }
+    @keyframes blink { 0%,100%{opacity:1} 50%{opacity:.3} }
+
+    /* ── Page body ── */
+    .page-body {
+      flex: 1;
+      position: relative;
+      z-index: 10;
+      padding: 24px 20px 40px;
+    }
+
     .page-wrapper {
       display: flex;
-      gap: 16px;
+      gap: 18px;
       align-items: flex-start;
       max-width: 860px;
       margin: 0 auto;
       transition: max-width 0.25s ease;
     }
-    .page-wrapper.logs-open { max-width: 1440px; }
-
+    .page-wrapper.logs-open { max-width: 1460px; }
     .main-panel { flex: 1; min-width: 320px; }
 
-    /* ── Page header ── */
-    .page-header {
+    /* ── Step accordion cards ── */
+    .step-card {
+      background: var(--surface);
+      border-radius: var(--card-r);
+      box-shadow: var(--shadow);
+      margin-bottom: 12px;
+    }
+
+    .step-header {
       display: flex;
       align-items: center;
-      justify-content: space-between;
-      margin-bottom: 16px;
+      gap: 14px;
+      padding: 16px 22px;
+      cursor: pointer;
+      user-select: none;
+      transition: background 0.15s;
     }
-    h1 { font-size: 18px; font-weight: 600; letter-spacing: -0.3px; }
-    h1 span { color: var(--accent); }
+    .step-header:hover { background: rgba(0,0,0,0.015); }
 
-    .btn-toggle-log {
+    .step-num {
+      width: 30px; height: 30px;
+      border-radius: 50%;
+      background: var(--amber);
+      color: #fff;
+      font-size: 13px; font-weight: 700;
+      display: flex; align-items: center; justify-content: center;
+      flex-shrink: 0;
+      box-shadow: 0 2px 6px rgba(233,168,37,0.3);
+    }
+
+    .step-info { flex: 1; }
+    .step-name { font-size: 13px; font-weight: 600; color: var(--text); }
+    .step-desc { font-size: 11px; color: var(--muted); margin-top: 2px; }
+
+    .step-badge {
       display: flex; align-items: center; gap: 6px;
-      padding: 6px 13px;
-      border: 1px solid var(--border);
-      border-radius: var(--radius);
-      background: transparent;
-      font-size: 12px; font-weight: 500;
-      color: var(--muted); cursor: pointer;
-      transition: all 0.15s;
+      padding: 4px 10px;
+      border-radius: 20px;
+      border: 1.5px solid var(--border);
+      transition: border-color 0.3s, background 0.3s;
     }
-    .btn-toggle-log:hover { border-color: var(--accent); color: var(--accent); }
-    .btn-toggle-log.active {
-      border-color: var(--accent);
-      color: var(--accent);
-      background: rgba(37,99,235,.06);
-    }
-    .btn-toggle-log .indicator {
-      width: 6px; height: 6px; border-radius: 50%;
-      background: var(--muted);
-      transition: background 0.2s;
-    }
-    .btn-toggle-log.running .indicator {
-      background: var(--accent);
-      animation: blink 1s infinite;
-    }
+    .step-badge.valid   { border-color: var(--green); background: rgba(22,163,74,0.06); }
+    .step-badge.invalid { border-color: var(--red);   background: rgba(220,38,38,0.06); }
 
-    /* ── Connectivity bar ── */
-    .conn-bar {
-      display: flex;
-      align-items: center;
-      gap: 20px;
-      padding: 8px 14px;
-      background: var(--surface);
-      border: 1px solid var(--border);
-      border-radius: var(--radius);
-      margin-bottom: 14px;
-      font-size: 12px;
-    }
-    .conn-label {
-      font-size: 10px; font-weight: 600;
-      text-transform: uppercase; letter-spacing: 0.7px;
-      color: var(--muted); margin-right: 4px;
-    }
-    .conn-item { display: flex; align-items: center; gap: 5px; }
-    .conn-dot {
+    .badge-dot {
       width: 7px; height: 7px; border-radius: 50%;
-      background: var(--border); flex-shrink: 0;
+      background: var(--border); transition: background 0.3s;
     }
-    .conn-dot.ok      { background: var(--green); }
-    .conn-dot.err     { background: var(--red); }
-    .conn-dot.pinging { background: var(--accent); animation: blink 1s infinite; }
-    .conn-name { color: var(--muted); font-size: 12px; }
-    .conn-name.ok  { color: var(--text); }
-    .conn-name.err { color: var(--red); }
-    .conn-refresh {
-      margin-left: auto;
-      background: none; border: none;
-      font-size: 12px; color: var(--muted);
-      cursor: pointer; padding: 2px 4px;
-      border-radius: 3px;
-    }
-    .conn-refresh:hover { color: var(--accent); }
+    .step-badge.valid   .badge-dot { background: var(--green); }
+    .step-badge.invalid .badge-dot { background: var(--red); }
 
-    /* ── Card ── */
-    .card {
-      background: var(--surface);
-      border: 1px solid var(--border);
-      border-radius: var(--radius);
-      padding: 20px 24px;
-      margin-bottom: 14px;
+    .badge-label {
+      font-size: 11px; font-weight: 500;
+      color: var(--muted); transition: color 0.3s;
     }
-    .card-title {
-      font-size: 11px; font-weight: 600;
-      text-transform: uppercase; letter-spacing: 0.8px;
-      color: var(--muted); margin-bottom: 14px;
+    .step-badge.valid   .badge-label { color: var(--green); }
+    .step-badge.invalid .badge-label { color: var(--red); }
+
+    .step-chevron {
+      font-size: 13px; color: var(--muted);
+      transition: transform 0.22s; flex-shrink: 0;
+    }
+    .step-chevron.open { transform: rotate(180deg); }
+
+    .step-body {
+      padding: 4px 22px 22px;
+      border-top: 1px solid rgba(0,0,0,0.05);
+      animation: slideDown 0.18s ease;
+    }
+    .step-body.collapsed { display: none; }
+    @keyframes slideDown { from { opacity:0; transform:translateY(-6px); } to { opacity:1; transform:translateY(0); } }
+
+    /* ── Form fields ── */
+    .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-top: 16px; }
+    .full { grid-column: 1 / -1; }
+    .field { display: flex; flex-direction: column; gap: 6px; }
+    .field label { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.6px; color: var(--muted); }
+
+    input[type="text"], input[type="date"], select {
+      width: 100%; padding: 9px 12px;
+      border: 1.5px solid var(--border);
+      border-radius: var(--radius);
+      font-size: 13px; font-family: inherit;
+      color: var(--text); background: #faf8f5;
+      outline: none; transition: border-color 0.15s, box-shadow 0.15s;
+    }
+    input::placeholder { color: #c0b8ae; }
+    input:focus, select:focus {
+      border-color: var(--amber);
+      background: #fff;
+      box-shadow: 0 0 0 3px var(--amber-s);
+    }
+
+    .auto-tag {
+      font-size: 10px; font-weight: 500;
+      color: var(--amber); background: rgba(233,168,37,0.1);
+      border-radius: 4px; padding: 1px 6px;
+      margin-left: 6px; vertical-align: middle;
     }
 
     /* ── Source toggle ── */
     .src-toggle {
       display: inline-flex;
-      border: 1px solid var(--border);
-      border-radius: var(--radius);
-      overflow: hidden;
-      margin-bottom: 18px;
+      border-radius: 20px;
+      background: #f0ebe3;
+      padding: 3px; gap: 2px;
+      margin-top: 16px; margin-bottom: 4px;
     }
     .src-toggle input { display: none; }
     .src-toggle label {
-      padding: 7px 20px; cursor: pointer;
-      font-size: 13px; font-weight: 500;
-      color: var(--muted); background: var(--surface);
-      transition: background 0.15s, color 0.15s; user-select: none;
+      padding: 6px 22px; cursor: pointer;
+      font-size: 12px; font-weight: 500;
+      color: var(--muted); border-radius: 17px;
+      transition: background 0.18s, color 0.18s, box-shadow 0.18s;
+      user-select: none;
     }
-    .src-toggle input:checked + label { background: var(--accent); color: #fff; }
-
-    /* ── Grid / Fields ── */
-    .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
-    .full { grid-column: 1 / -1; }
-    .field { display: flex; flex-direction: column; gap: 5px; }
-    label { font-size: 12px; font-weight: 500; color: var(--muted); }
-
-    input[type="text"], input[type="date"], select {
-      width: 100%; padding: 7px 10px;
-      border: 1px solid var(--border);
-      border-radius: var(--radius);
-      font-size: 13px; font-family: inherit;
-      color: var(--text); background: var(--surface);
-      outline: none; transition: border-color 0.15s;
+    .src-toggle input:checked + label {
+      background: var(--amber); color: #fff;
+      box-shadow: 0 2px 6px rgba(233,168,37,0.3);
     }
-    input:focus, select:focus { border-color: var(--accent); }
 
     .source-section { display: none; }
     .source-section.active { display: contents; }
 
+    /* ── Stage checklist summary ── */
+    .stage-summary {
+      background: var(--surface);
+      border-radius: var(--card-r);
+      box-shadow: var(--shadow);
+      padding: 16px 22px;
+      margin-bottom: 12px;
+    }
+    .stage-summary-title {
+      font-size: 10px; font-weight: 700;
+      text-transform: uppercase; letter-spacing: 0.8px;
+      color: var(--muted); margin-bottom: 12px;
+    }
+    .summary-row {
+      display: flex; align-items: center; gap: 10px;
+      padding: 6px 0;
+      border-bottom: 1px solid rgba(0,0,0,0.05);
+    }
+    .summary-row:last-child { border-bottom: none; }
+    .summary-dot {
+      width: 9px; height: 9px; border-radius: 50%;
+      background: var(--border); flex-shrink: 0;
+      transition: background 0.3s;
+    }
+    .summary-dot.valid   { background: var(--green); }
+    .summary-dot.invalid { background: var(--red); }
+    .summary-label { font-size: 12px; font-weight: 500; flex: 1; }
+    .summary-status {
+      font-size: 11px;
+      color: var(--muted);
+      transition: color 0.3s;
+    }
+    .summary-status.valid   { color: var(--green); }
+    .summary-status.invalid { color: var(--red); }
+
     /* ── Run button ── */
     .btn-run {
-      width: 100%; padding: 10px;
-      background: var(--accent); color: #fff;
+      width: 100%; padding: 13px;
+      background: var(--amber); color: #fff;
       border: none; border-radius: var(--radius);
-      font-size: 13px; font-weight: 600;
-      cursor: pointer; transition: background 0.15s; margin-top: 4px;
+      font-size: 14px; font-weight: 700;
+      cursor: pointer;
+      transition: background 0.15s, box-shadow 0.15s, transform 0.1s;
+      box-shadow: 0 3px 10px rgba(233,168,37,0.35);
+      letter-spacing: 0.1px;
+      margin-bottom: 16px;
     }
-    .btn-run:hover  { background: var(--accent-h); }
-    .btn-run:disabled { opacity: 0.5; cursor: not-allowed; }
+    .btn-run:hover:not(:disabled) {
+      background: var(--amber-h);
+      box-shadow: 0 5px 18px rgba(233,168,37,0.45);
+      transform: translateY(-1px);
+    }
+    .btn-run:active:not(:disabled) { transform: translateY(0); }
+    .btn-run:disabled { opacity: 0.45; cursor: not-allowed; box-shadow: none; }
 
-    /* ─────────────────────────────────────────────
-       Pipeline visualization
-    ───────────────────────────────────────────── */
+    /* ── Pipeline visualization ── */
     #pipeline-card { display: none; }
+    .pipeline-wrap {
+      background: var(--surface);
+      border-radius: var(--card-r);
+      box-shadow: var(--shadow);
+      padding: 20px 22px;
+      margin-bottom: 12px;
+    }
+    .pipeline-title {
+      font-size: 10px; font-weight: 700;
+      text-transform: uppercase; letter-spacing: 0.8px;
+      color: var(--muted); margin-bottom: 16px;
+    }
 
     .pipeline {
       display: flex; align-items: flex-start;
-      padding: 8px 0 4px; overflow-x: auto;
+      padding: 6px 0 4px; overflow-x: auto;
     }
-
     .step {
       display: flex; flex-direction: column;
       align-items: center; flex: 1;
-      min-width: 68px; position: relative;
+      min-width: 64px; position: relative;
     }
-
     .step:not(:last-child)::after {
       content: '';
-      position: absolute; top: 11px;
-      left: calc(50% + 12px);
-      right: calc(-50% + 12px);
+      position: absolute; top: 14px;
+      left: calc(50% + 15px);
+      right: calc(-50% + 15px);
       height: 2px; background: var(--border);
       transition: background 0.4s; z-index: 0;
     }
@@ -207,15 +374,15 @@
     .step.fail:not(:last-child)::after { background: var(--red); }
 
     .step-dot {
-      width: 24px; height: 24px; border-radius: 50%;
-      background: var(--border); border: 2px solid var(--border);
+      width: 28px; height: 28px; border-radius: 50%;
+      background: #ede8e0; border: 2px solid #ddd8d0;
       z-index: 1; position: relative;
       transition: background 0.3s, border-color 0.3s;
       display: flex; align-items: center; justify-content: center;
     }
-    .step.running .step-dot { background: var(--accent); border-color: var(--accent); animation: pulse-ring 1s infinite; }
-    .step.done    .step-dot { background: var(--green); border-color: var(--green); }
-    .step.fail    .step-dot { background: var(--red); border-color: var(--red); }
+    .step.running .step-dot { background: var(--amber); border-color: var(--amber); animation: pulse-ring 1s infinite; }
+    .step.done    .step-dot { background: var(--green); border-color: var(--green); box-shadow: 0 2px 6px rgba(22,163,74,0.3); }
+    .step.fail    .step-dot { background: var(--red);   border-color: var(--red);   box-shadow: 0 2px 6px rgba(220,38,38,0.3); }
     .step.done .step-dot::after { content: '✓'; color: #fff; font-size: 11px; font-weight: 700; }
     .step.fail .step-dot::after { content: '✕'; color: #fff; font-size: 11px; font-weight: 700; }
 
@@ -224,47 +391,85 @@
       color: var(--muted); margin-top: 7px;
       text-align: center; line-height: 1.3; white-space: nowrap;
     }
-    .step.running .step-label { color: var(--accent); }
+    .step.running .step-label { color: var(--amber); }
     .step.done    .step-label { color: var(--green); }
     .step.fail    .step-label { color: var(--red); }
 
     @keyframes pulse-ring {
-      0%   { box-shadow: 0 0 0 0   rgba(37,99,235,.5); }
-      70%  { box-shadow: 0 0 0 7px rgba(37,99,235,0); }
-      100% { box-shadow: 0 0 0 0   rgba(37,99,235,0); }
+      0%   { box-shadow: 0 0 0 0   rgba(233,168,37,.5); }
+      70%  { box-shadow: 0 0 0 7px rgba(233,168,37,0); }
+      100% { box-shadow: 0 0 0 0   rgba(233,168,37,0); }
     }
 
     /* ── Job status row ── */
     #job-status { display: flex; align-items: center; gap: 10px; margin-top: 16px; }
     .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); flex-shrink: 0; }
-    .dot.running { background: var(--accent); animation: blink 1s infinite; }
-    .dot.ok      { background: var(--green); }
-    .dot.err     { background: var(--red); }
-    @keyframes blink { 0%,100%{opacity:1} 50%{opacity:.3} }
+    .dot.running { background: var(--amber); animation: blink 1s infinite; }
+    .dot.ok  { background: var(--green); }
+    .dot.err { background: var(--red); }
     #status-text { font-size: 13px; color: var(--muted); flex: 1; }
     .btn-action {
       display: none; padding: 6px 13px;
-      background: transparent; border: 1px solid var(--border);
-      border-radius: var(--radius); font-size: 12px; font-weight: 500;
+      background: transparent; border: 1.5px solid var(--border);
+      border-radius: 20px; font-size: 12px; font-weight: 500;
       color: var(--text); cursor: pointer; text-decoration: none;
       transition: border-color 0.15s, color 0.15s; white-space: nowrap;
     }
-    .btn-action:hover { border-color: var(--accent); color: var(--accent); }
+    .btn-action:hover { border-color: var(--amber); color: var(--amber); }
     .btn-action.visible { display: inline-block; }
 
-    /* ─────────────────────────────────────────────
-       Right panel — live log
-    ───────────────────────────────────────────── */
+    /* ── Run History ── */
+    .history-wrap {
+      background: var(--surface);
+      border-radius: var(--card-r);
+      box-shadow: var(--shadow);
+      padding: 16px 22px;
+      margin-bottom: 12px;
+    }
+    .history-header {
+      display: flex; align-items: center; justify-content: space-between;
+    }
+    .history-title {
+      font-size: 10px; font-weight: 700;
+      text-transform: uppercase; letter-spacing: 0.8px;
+      color: var(--muted);
+    }
+    .btn-history-toggle {
+      padding: 4px 12px;
+      border: 1.5px solid var(--border); border-radius: 20px;
+      background: transparent; font-size: 11px; font-weight: 500;
+      color: var(--muted); cursor: pointer;
+      transition: border-color 0.15s, color 0.15s;
+    }
+    .btn-history-toggle:hover { border-color: var(--amber); color: var(--amber); }
+    .history-body { margin-top: 12px; }
+    .history-empty { font-size: 12px; color: var(--muted); padding: 4px 0; }
+    .history-row {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 7px 0; border-bottom: 1px solid rgba(0,0,0,0.05);
+    }
+    .history-row:last-child { border-bottom: none; }
+    .history-label { font-family: var(--mono); font-size: 11px; color: var(--text); }
+    .history-meta  { font-size: 11px; color: var(--muted); margin-left: 8px; }
+    .btn-view-log {
+      padding: 3px 10px; border: 1.5px solid var(--border);
+      border-radius: 20px; background: transparent;
+      font-size: 11px; color: var(--muted); cursor: pointer;
+      transition: border-color 0.15s, color 0.15s;
+    }
+    .btn-view-log:hover { border-color: var(--amber); color: var(--amber); }
+
+    /* ── Log panel (right) ── */
     .log-panel {
       display: none;
       width: 500px; flex-shrink: 0;
       position: sticky; top: 24px;
-      height: calc(100vh - 48px);
+      height: calc(100vh - 80px);
       flex-direction: column;
       background: #0d0d0d;
-      border-radius: var(--radius);
-      border: 1px solid #252525;
+      border-radius: var(--card-r);
       overflow: hidden;
+      box-shadow: 0 4px 24px rgba(0,0,0,0.18), 0 1px 4px rgba(0,0,0,0.12);
     }
     .log-panel.open { display: flex; }
 
@@ -295,179 +500,310 @@
       font-family: var(--mono); font-size: 11.5px;
       line-height: 1.75; color: #c9c9c9;
       white-space: pre-wrap; word-break: break-all;
-      margin: 0;
     }
     #live-log::-webkit-scrollbar { width: 5px; }
     #live-log::-webkit-scrollbar-track { background: transparent; }
     #live-log::-webkit-scrollbar-thumb { background: #2d2d2d; border-radius: 3px; }
-    #live-log::-webkit-scrollbar-thumb:hover { background: #444; }
 
     .ll      { display: block; }
     .ll.err  { color: #f87171; }
     .ll.warn { color: #fbbf24; }
     .ll.ok   { color: #4ade80; }
     .ll.dim  { color: #444; }
+    .log-empty { padding: 40px 14px; text-align: center; font-size: 12px; color: #333; }
 
-    .log-empty {
-      padding: 40px 14px;
-      text-align: center;
-      font-size: 12px; color: #333;
+    /* ── Combobox ── */
+    .combo-wrap { position: relative; }
+    .combo-wrap input { padding-right: 30px !important; }
+    .combo-arrow {
+      position: absolute; right: 8px; top: 50%;
+      transform: translateY(-50%);
+      background: none; border: none;
+      color: var(--muted); font-size: 11px;
+      cursor: pointer; padding: 4px 4px;
+      line-height: 1; transition: color 0.15s;
     }
+    .combo-arrow:hover { color: var(--amber); }
+    .combo-dropdown {
+      display: none;
+      position: absolute; top: calc(100% + 4px); left: 0; right: 0;
+      background: var(--surface);
+      border: 1.5px solid var(--border);
+      border-radius: var(--radius);
+      box-shadow: 0 6px 20px rgba(0,0,0,0.1);
+      z-index: 200; max-height: 200px; overflow-y: auto;
+    }
+    .combo-dropdown::-webkit-scrollbar { width: 4px; }
+    .combo-dropdown::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+    .combo-item {
+      padding: 8px 12px; font-size: 12px;
+      font-family: var(--mono); color: var(--text);
+      cursor: pointer; white-space: nowrap;
+      overflow: hidden; text-overflow: ellipsis;
+      transition: background 0.1s, color 0.1s;
+    }
+    .combo-item:hover { background: rgba(233,168,37,0.08); color: var(--amber); }
+    .combo-item.combo-muted { color: var(--muted); cursor: default; font-family: inherit; font-size: 11px; }
+    .combo-item.combo-muted:hover { background: none; color: var(--muted); }
 
-    /* ── Separator line in log ── */
-    .ll.sep {
-      color: #2d2d2d;
-      display: block;
-      padding: 2px 0;
+    /* ── Footer ── */
+    .page-footer {
+      text-align: center;
+      font-size: 11px;
+      color: rgba(0,0,0,0.2);
+      padding: 12px 0 20px;
+      position: relative; z-index: 10;
     }
   </style>
 </head>
 <body>
+
+<!-- ── Decorative background ──────────────────────────────── -->
+<div class="deco deco-dots deco-dots-1"></div>
+<div class="deco deco-dots deco-dots-2"></div>
+<div class="deco deco-card deco-card-1"></div>
+<div class="deco deco-card deco-card-2"></div>
+<div class="deco deco-card deco-card-3"></div>
+<div class="deco deco-circle deco-circle-1"></div>
+<div class="deco deco-circle deco-circle-2"></div>
+<div class="deco deco-circle deco-circle-3"></div>
+<svg class="deco deco-wave deco-wave-1" width="72" height="22" viewBox="0 0 72 22" fill="none">
+  <path d="M0 11 Q9 3 18 11 Q27 19 36 11 Q45 3 54 11 Q63 19 72 11" stroke="#1a1a1a" stroke-width="2" fill="none" stroke-linecap="round"/>
+</svg>
+<svg class="deco deco-wave deco-wave-2" width="72" height="22" viewBox="0 0 72 22" fill="none">
+  <path d="M0 11 Q9 3 18 11 Q27 19 36 11 Q45 3 54 11 Q63 19 72 11" stroke="#1a1a1a" stroke-width="2" fill="none" stroke-linecap="round"/>
+</svg>
+
+<!-- ── Top bar ────────────────────────────────────────────── -->
+<div class="top-bar">
+  <div class="top-brand-group">
+    <div class="logo-mark"></div>
+    <div>
+      <div class="top-brand">DE Metadata <span>Pipeline</span></div>
+      <div class="top-sub">Metadata-driven ingestion framework</div>
+    </div>
+  </div>
+
+  <div class="top-actions">
+    <!-- Connectivity dots -->
+    <div class="conn-item">
+      <div class="conn-dot pinging" id="conn-minio-dot"></div>
+      <span class="conn-name" id="conn-minio-name">MinIO</span>
+    </div>
+    <div class="conn-item">
+      <div class="conn-dot pinging" id="conn-vault-dot"></div>
+      <span class="conn-name" id="conn-vault-name">Vault</span>
+    </div>
+    <button class="top-btn" style="padding:4px 8px;font-size:13px;" title="Refresh connectivity" onclick="checkConnectivity()">↻</button>
+
+    <div class="conn-divider"></div>
+
+    <!-- Live logs -->
+    <button class="top-btn" id="log-toggle-btn" onclick="toggleLogPanel()">
+      <span class="indicator" id="log-indicator"></span>
+      Live Logs
+    </button>
+
+    <!-- Users (root only) -->
+    {% if current_user.is_root %}
+    <a href="{{ url_for('auth.users') }}" class="top-btn" style="text-decoration:none">Users</a>
+    {% endif %}
+
+    <!-- Logout -->
+    <form method="POST" action="{{ url_for('auth.logout') }}" style="margin:0">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <button type="submit" class="top-btn">Logout</button>
+    </form>
+  </div>
+</div>
+
+<!-- ── Page body ──────────────────────────────────────────── -->
+<div class="page-body">
 <div class="page-wrapper" id="page-wrapper">
 
-  <!-- ══ Left: main panel ═══════════════════════════════════════════════════ -->
+  <!-- ═══ Main panel ═══════════════════════════════════════ -->
   <div class="main-panel">
-
-    <!-- Header -->
-    <div class="page-header">
-      <h1>DE Metadata <span>Pipeline</span></h1>
-      <div style="display:flex;align-items:center;gap:8px;">
-        {% if current_user.is_root %}
-        <a href="{{ url_for('auth.users') }}" class="btn-toggle-log" style="text-decoration:none">Users</a>
-        {% endif %}
-        <button class="btn-toggle-log" id="log-toggle-btn" onclick="toggleLogPanel()">
-          <span class="indicator" id="log-indicator"></span>
-          Live Logs
-        </button>
-        <form method="POST" action="{{ url_for('auth.logout') }}" style="margin:0">
-          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-          <button type="submit" class="btn-toggle-log">Logout</button>
-        </form>
-      </div>
-    </div>
-
-    <!-- Connectivity status -->
-    <div class="conn-bar">
-      <span class="conn-label">Services</span>
-      <div class="conn-item">
-        <div class="conn-dot pinging" id="conn-minio-dot"></div>
-        <span class="conn-name" id="conn-minio-name">MinIO</span>
-      </div>
-      <div class="conn-item">
-        <div class="conn-dot pinging" id="conn-vault-dot"></div>
-        <span class="conn-name" id="conn-vault-name">Vault</span>
-      </div>
-      <button class="conn-refresh" title="Re-check connectivity" onclick="checkConnectivity()">↻</button>
-    </div>
 
     <form id="pipeline-form">
       <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <input type="hidden" name="log_folder"  id="log_folder"  value="lake" />
+      <input type="hidden" name="log_level"   id="log_level"   value="INFO" />
+      <input type="hidden" name="write_mode"  id="write_mode"  value="overwrite" />
+      <input type="hidden" name="output_catalog" id="output_catalog" value="minio" />
 
-      <!-- Source -->
-      <div class="card">
-        <div class="card-title">Source</div>
-        <div class="src-toggle">
-          <input type="radio" name="source_type" id="src-s3" value="s3" checked />
-          <label for="src-s3">S3</label>
-          <input type="radio" name="source_type" id="src-db" value="database" />
-          <label for="src-db">Database</label>
+      <!-- ── Step 1: Application ─────────────────────────── -->
+      <div class="step-card" id="step-card-1">
+        <div class="step-header" onclick="toggleStep(1)">
+          <div class="step-num">1</div>
+          <div class="step-info">
+            <div class="step-name">Application</div>
+            <div class="step-desc">Name and run date</div>
+          </div>
+          <div class="step-badge" id="step-badge-1">
+            <div class="badge-dot"></div>
+            <span class="badge-label">Incomplete</span>
+          </div>
+          <div class="step-chevron open" id="step-chevron-1">▾</div>
         </div>
-        <div class="grid">
-          <div class="source-section active" id="section-s3">
+        <div class="step-body" id="step-body-1">
+          <div class="grid">
             <div class="field">
-              <label for="source_bucket">Source Bucket</label>
-              <input type="text" id="source_bucket" name="source_bucket" placeholder="de-source-data-bucket" />
+              <label for="application_name">Application Name</label>
+              <input type="text" id="application_name" name="application_name"
+                     placeholder="e.g. enigma_covid_19_us_states" />
             </div>
             <div class="field">
-              <label for="source_key">Source Key</label>
-              <input type="text" id="source_key" name="source_key" placeholder="folder/file.csv" />
+              <label for="ingest_date">Run Date</label>
+              <input type="date" id="ingest_date" name="ingest_date" />
             </div>
-          </div>
-          <div class="source-section" id="section-db">
-            <div class="field">
-              <label for="source_database">Source Schema</label>
-              <input type="text" id="source_database" name="source_database" placeholder="public" />
-            </div>
-            <div class="field">
-              <label for="source_table_name">Source Table</label>
-              <input type="text" id="source_table_name" name="source_table_name" placeholder="my_table" />
-            </div>
-          </div>
-          <div class="field full">
-            <label for="metadata_key">Metadata Sheet Key</label>
-            <input type="text" id="metadata_key" name="metadata_key" placeholder="my_table_metadata.csv" />
           </div>
         </div>
       </div>
 
-      <!-- Job -->
-      <div class="card">
-        <div class="card-title">Job</div>
-        <div class="grid">
-          <div class="field">
-            <label for="application_name">Application Name</label>
-            <input type="text" id="application_name" name="application_name" placeholder="Enigma_Aggregation" />
+      <!-- ── Step 2: Source ──────────────────────────────── -->
+      <div class="step-card" id="step-card-2">
+        <div class="step-header" onclick="toggleStep(2)">
+          <div class="step-num">2</div>
+          <div class="step-info">
+            <div class="step-name">Source</div>
+            <div class="step-desc">S3 file or database table, plus metadata sheet</div>
           </div>
-          <div class="field">
-            <label for="ingest_date">Ingest Date</label>
-            <input type="date" id="ingest_date" name="ingest_date" />
+          <div class="step-badge" id="step-badge-2">
+            <div class="badge-dot"></div>
+            <span class="badge-label">Incomplete</span>
+          </div>
+          <div class="step-chevron" id="step-chevron-2">▾</div>
+        </div>
+        <div class="step-body collapsed" id="step-body-2">
+          <div class="src-toggle">
+            <input type="radio" name="source_type" id="src-s3" value="s3" checked />
+            <label for="src-s3">S3</label>
+            <input type="radio" name="source_type" id="src-db" value="database" />
+            <label for="src-db">Database</label>
+          </div>
+          <div class="grid">
+            <div class="source-section active" id="section-s3">
+              <div class="field">
+                <label for="source_bucket">Source Bucket</label>
+                <input type="text" id="source_bucket" name="source_bucket"
+                       placeholder="de-source-data-bucket" />
+              </div>
+              <div class="field">
+                <label for="source_key">Source Key</label>
+                <div class="combo-wrap">
+                  <input type="text" id="source_key" name="source_key"
+                         placeholder="folder/file.csv" />
+                </div>
+              </div>
+            </div>
+            <div class="source-section" id="section-db">
+              <div class="field">
+                <label for="source_database">Source Schema</label>
+                <input type="text" id="source_database" name="source_database"
+                       placeholder="public" />
+              </div>
+              <div class="field">
+                <label for="source_table_name">Source Table</label>
+                <input type="text" id="source_table_name" name="source_table_name"
+                       placeholder="my_table" />
+              </div>
+            </div>
+            <div class="field full">
+              <label for="metadata_key">Metadata Sheet Key</label>
+              <div class="combo-wrap">
+                <input type="text" id="metadata_key" name="metadata_key"
+                       placeholder="my_table_metadata.csv" />
+              </div>
+            </div>
           </div>
         </div>
       </div>
 
-      <!-- Output -->
-      <div class="card">
-        <div class="card-title">Output</div>
-        <div class="grid">
-          <div class="field">
-            <label for="output_database">Output Database</label>
-            <input type="text" id="output_database" name="output_database" placeholder="de_lake" />
+      <!-- ── Step 3: Target ──────────────────────────────── -->
+      <div class="step-card" id="step-card-3">
+        <div class="step-header" onclick="toggleStep(3)">
+          <div class="step-num">3</div>
+          <div class="step-info">
+            <div class="step-name">Target</div>
+            <div class="step-desc">Iceberg catalog, database, and table</div>
           </div>
-          <div class="field">
-            <label for="output_catalog">Output Catalog</label>
-            <input type="text" id="output_catalog" name="output_catalog" value="minio" />
+          <div class="step-badge" id="step-badge-3">
+            <div class="badge-dot"></div>
+            <span class="badge-label">Incomplete</span>
           </div>
-          <div class="field">
-            <label for="output_table_name">Output Table Name <span style="font-weight:400">(optional)</span></label>
-            <input type="text" id="output_table_name" name="output_table_name" placeholder="defaults to application name" />
+          <div class="step-chevron" id="step-chevron-3">▾</div>
+        </div>
+        <div class="step-body collapsed" id="step-body-3">
+          <div class="grid">
+            <div class="field">
+              <label for="output_catalog_display">Catalog</label>
+              <input type="text" id="output_catalog_display" placeholder="minio"
+                     oninput="document.getElementById('output_catalog').value=this.value||'minio'" />
+            </div>
+            <div class="field">
+              <label for="output_database">Database</label>
+              <input type="text" id="output_database" name="output_database"
+                     placeholder="default" />
+            </div>
+            <div class="field full">
+              <label for="output_table_name">
+                Table Name
+                <span class="auto-tag" id="auto-tag" style="display:none">auto</span>
+              </label>
+              <input type="text" id="output_table_name" name="output_table_name"
+                     placeholder="auto from application name" />
+            </div>
           </div>
-          <div class="field">
-            <label for="write_mode">Write Mode</label>
-            <select id="write_mode" name="write_mode">
-              <option value="overwrite">overwrite</option>
-              <option value="append">append</option>
-              <option value="replace">replace</option>
-            </select>
+
+          <!-- Advanced config (write mode, log level) -->
+          <div class="grid" style="margin-top:6px;">
+            <div class="field">
+              <label>Write Mode</label>
+              <select id="write_mode_sel" onchange="document.getElementById('write_mode').value=this.value">
+                <option value="overwrite" selected>overwrite</option>
+                <option value="append">append</option>
+                <option value="replace">replace</option>
+              </select>
+            </div>
+            <div class="field">
+              <label>Log Level</label>
+              <select id="log_level_sel" onchange="document.getElementById('log_level').value=this.value">
+                <option value="INFO" selected>INFO</option>
+                <option value="DEBUG">DEBUG</option>
+                <option value="WARNING">WARNING</option>
+                <option value="ERROR">ERROR</option>
+              </select>
+            </div>
           </div>
         </div>
       </div>
 
-      <!-- Config -->
-      <div class="card">
-        <div class="card-title">Config</div>
-        <div class="grid">
-          <div class="field">
-            <label for="log_folder">Log Folder</label>
-            <input type="text" id="log_folder" name="log_folder" value="lake" />
-          </div>
-          <div class="field">
-            <label for="log_level">Log Level</label>
-            <select id="log_level" name="log_level">
-              <option value="INFO" selected>INFO</option>
-              <option value="DEBUG">DEBUG</option>
-              <option value="WARNING">WARNING</option>
-              <option value="ERROR">ERROR</option>
-            </select>
-          </div>
+      <!-- ── Stage checklist summary ─────────────────────── -->
+      <div class="stage-summary">
+        <div class="stage-summary-title">Ready to run?</div>
+        <div class="summary-row">
+          <div class="summary-dot" id="sum-dot-1"></div>
+          <span class="summary-label">Application Details</span>
+          <span class="summary-status" id="sum-status-1">Incomplete</span>
+        </div>
+        <div class="summary-row">
+          <div class="summary-dot" id="sum-dot-2"></div>
+          <span class="summary-label">Source Details</span>
+          <span class="summary-status" id="sum-status-2">Incomplete</span>
+        </div>
+        <div class="summary-row">
+          <div class="summary-dot" id="sum-dot-3"></div>
+          <span class="summary-label">Target Details</span>
+          <span class="summary-status" id="sum-status-3">Incomplete</span>
         </div>
       </div>
 
-      <button type="submit" class="btn-run" id="run-btn">&#9654;&nbsp; Run Pipeline</button>
+      <button type="submit" class="btn-run" id="run-btn" disabled>&#9654;&nbsp; Run Pipeline</button>
     </form>
 
-    <!-- Pipeline visualization -->
-    <div class="card" id="pipeline-card" style="display:none; margin-top:14px;">
-      <div class="card-title">Pipeline</div>
+    <!-- ── Pipeline visualization ────────────────────────── -->
+    <div class="pipeline-wrap" id="pipeline-card" style="display:none;">
+      <div class="pipeline-title">Pipeline Progress</div>
       <div class="pipeline" id="pipeline-steps">
         <div class="step" data-step="connectivity"><div class="step-dot"></div><div class="step-label">Connectivity</div></div>
         <div class="step" data-step="spark">        <div class="step-dot"></div><div class="step-label">Spark Session</div></div>
@@ -485,12 +821,23 @@
       </div>
     </div>
 
+    <!-- ── Run History ──────────────────────────────────── -->
+    <div class="history-wrap" id="history-card">
+      <div class="history-header">
+        <div class="history-title">Run History</div>
+        <button class="btn-history-toggle" id="history-toggle-btn" onclick="toggleHistory()">Show</button>
+      </div>
+      <div class="history-body" id="history-list" style="display:none;">
+        <span class="history-empty">Enter an application name to load history.</span>
+      </div>
+    </div>
+
   </div><!-- /main-panel -->
 
-  <!-- ══ Right: live log panel ══════════════════════════════════════════════ -->
+  <!-- ═══ Log panel (right) ════════════════════════════════ -->
   <div class="log-panel" id="log-panel">
     <div class="log-panel-header">
-      <span class="log-panel-title">Live Logs</span>
+      <span class="log-panel-title" id="log-panel-title">Live Logs</span>
       <div class="log-panel-actions">
         <span id="log-line-count">0 lines</span>
         <button class="btn-log-clear" onclick="clearLog()">Clear</button>
@@ -500,12 +847,15 @@
   </div>
 
 </div><!-- /page-wrapper -->
+</div><!-- /page-body -->
+
+<div class="page-footer">© 2026 DE Metadata Framework &nbsp;·&nbsp; Internal Use Only</div>
 
 <script>
-  // ── Connectivity check ─────────────────────────────────────────────────────
+  // ── Connectivity ─────────────────────────────────────────
   async function checkConnectivity() {
     const setConn = (svc, state, label) => {
-      document.getElementById(`conn-${svc}-dot`).className  = `conn-dot ${state}`;
+      document.getElementById(`conn-${svc}-dot`).className = `conn-dot ${state}`;
       const nameEl = document.getElementById(`conn-${svc}-name`);
       nameEl.className   = `conn-name ${state}`;
       nameEl.textContent = label;
@@ -515,10 +865,10 @@
     try {
       const r    = await fetch('/connectivity');
       const data = await r.json();
-      const st   = (v) => v === 'ok' ? 'ok' : 'err';
+      const st   = v => v === 'ok' ? 'ok' : 'err';
       setConn('minio', st(data.minio), data.minio === 'ok' ? 'MinIO' : 'MinIO — ' + data.minio);
       setConn('vault', st(data.vault), data.vault === 'ok' ? 'Vault' : 'Vault — ' + data.vault);
-    } catch (e) {
+    } catch {
       setConn('minio', 'err', 'MinIO — unreachable');
       setConn('vault', 'err', 'Vault — unreachable');
     }
@@ -526,7 +876,7 @@
   checkConnectivity();
   setInterval(checkConnectivity, 30000);
 
-  // ── Log panel toggle ───────────────────────────────────────────────────────
+  // ── Log panel ────────────────────────────────────────────
   let _logOpen = false;
   function toggleLogPanel() {
     _logOpen = !_logOpen;
@@ -535,71 +885,124 @@
     document.getElementById('log-toggle-btn').classList.toggle('active', _logOpen);
   }
 
-  // ── Live log append ────────────────────────────────────────────────────────
-  let _lineCount = 0;
-  let _autoScroll = true;
+  let _lineCount = 0, _autoScroll = true;
 
   function appendLog(line) {
-    const pre = document.getElementById('live-log');
-
-    // Remove placeholder on first real line
+    const pre   = document.getElementById('live-log');
     const empty = pre.querySelector('.log-empty');
     if (empty) empty.remove();
-
     if (!line) return;
     _lineCount++;
-
-    const span = document.createElement('span');
+    const span  = document.createElement('span');
     span.className = 'll';
-
     const lower = line.toLowerCase();
-    if (/\b(error|exception|failed|fail)\b/.test(lower))  span.classList.add('err');
-    else if (/\b(warn|warning)\b/.test(lower))            span.classList.add('warn');
+    if (/\b(error|exception|failed|fail)\b/.test(lower))          span.classList.add('err');
+    else if (/\b(warn|warning)\b/.test(lower))                    span.classList.add('warn');
     else if (/pipeline complete|all.*passed|success/.test(lower)) span.classList.add('ok');
     else if (/^(22\/|23\/|\s+at |py4j|spark\.|hadoop\.|java\.)/.test(line.trimStart())) span.classList.add('dim');
-
     span.textContent = line + '\n';
     pre.appendChild(span);
-
     if (_autoScroll) pre.scrollTop = pre.scrollHeight;
     document.getElementById('log-line-count').textContent = `${_lineCount} lines`;
   }
 
-  function clearLog() {
+  function clearLog(placeholder) {
     const pre = document.getElementById('live-log');
-    pre.innerHTML = '<span class="log-empty">Log cleared.</span>';
+    pre.innerHTML = `<span class="log-empty">${placeholder || 'Logs will stream here when a job runs.'}</span>`;
     _lineCount = 0;
     document.getElementById('log-line-count').textContent = '0 lines';
   }
 
-  function logSeparator(label) {
-    const pre  = document.getElementById('live-log');
-    const empty = pre.querySelector('.log-empty');
-    if (empty) empty.remove();
-    const sep = document.createElement('span');
-    sep.className   = 'll sep';
-    sep.textContent = `── ${label} ${'─'.repeat(Math.max(0, 48 - label.length))}`;
-    pre.appendChild(sep);
-  }
-
-  // keep scroll-to-bottom unless user scrolled up manually
   document.getElementById('live-log').addEventListener('scroll', () => {
     const el = document.getElementById('live-log');
     _autoScroll = el.scrollTop + el.clientHeight >= el.scrollHeight - 8;
   });
 
-  // ── Source toggle ──────────────────────────────────────────────────────────
+  // ── Source toggle ────────────────────────────────────────
   document.querySelectorAll('input[name="source_type"]').forEach(r =>
     r.addEventListener('change', () => {
       const s3 = r.value === 's3';
       document.getElementById('section-s3').classList.toggle('active', s3);
       document.getElementById('section-db').classList.toggle('active', !s3);
+      validateStages();
     })
   );
 
-  document.getElementById('ingest_date').value = new Date().toISOString().slice(0, 10);
+  // ── Step accordion ───────────────────────────────────────
+  function toggleStep(n) {
+    const body    = document.getElementById(`step-body-${n}`);
+    const chevron = document.getElementById(`step-chevron-${n}`);
+    const open    = !body.classList.contains('collapsed');
+    body.classList.toggle('collapsed', open);
+    chevron.classList.toggle('open', !open);
+  }
 
-  // ── Pipeline step definitions ──────────────────────────────────────────────
+  // ── Stage validation ─────────────────────────────────────
+  function val(id) { return (document.getElementById(id)?.value || '').trim(); }
+
+  function getStageValid(n) {
+    if (n === 1) return val('application_name') !== '' && val('ingest_date') !== '';
+    if (n === 2) {
+      const s3 = document.getElementById('src-s3').checked;
+      const meta = val('metadata_key') !== '';
+      if (s3) return val('source_bucket') !== '' && val('source_key') !== '' && meta;
+      return val('source_table_name') !== '' && meta;
+    }
+    if (n === 3) return val('output_database') !== '';
+    return false;
+  }
+
+  function validateStages() {
+    let allValid = true;
+    for (let n = 1; n <= 3; n++) {
+      const valid   = getStageValid(n);
+      if (!valid) allValid = false;
+
+      // Step badge
+      const badge = document.getElementById(`step-badge-${n}`);
+      badge.classList.toggle('valid',   valid);
+      badge.classList.toggle('invalid', !valid);
+      badge.querySelector('.badge-label').textContent = valid ? 'Complete' : 'Incomplete';
+
+      // Summary row
+      document.getElementById(`sum-dot-${n}`).className    = `summary-dot ${valid ? 'valid' : 'invalid'}`;
+      const sl = document.getElementById(`sum-status-${n}`);
+      sl.textContent = valid ? 'Complete' : 'Incomplete';
+      sl.className   = `summary-status ${valid ? 'valid' : 'invalid'}`;
+    }
+    document.getElementById('run-btn').disabled = !allValid;
+  }
+
+  // Watch all required inputs
+  ['application_name','ingest_date','source_bucket','source_key','source_table_name','metadata_key','output_database','output_table_name']
+    .forEach(id => {
+      const el = document.getElementById(id);
+      if (el) el.addEventListener('input', validateStages);
+    });
+
+  // ── Auto-fill table name from application name ────────────
+  let _tableManual = false;
+  document.getElementById('application_name').addEventListener('input', function () {
+    const slug = this.value.toLowerCase().replace(/[\s\-]+/g, '_').replace(/[^a-z0-9_]/g, '');
+    const tbl  = document.getElementById('output_table_name');
+    if (!_tableManual) {
+      tbl.value = slug;
+      document.getElementById('auto-tag').style.display = slug ? 'inline' : 'none';
+    }
+    validateStages();
+    loadHistory(this.value.trim(), 'lake');
+  });
+  document.getElementById('output_table_name').addEventListener('input', function () {
+    _tableManual = this.value.length > 0;
+    document.getElementById('auto-tag').style.display = _tableManual ? 'none' : 'inline';
+    validateStages();
+  });
+
+  // Default date
+  document.getElementById('ingest_date').value = new Date().toISOString().slice(0, 10);
+  validateStages();
+
+  // ── Pipeline step definitions ────────────────────────────
   const STEPS = [
     { id: 'connectivity', start: /Checking (source S3|Supabase|MinIO) connectivity/,       done: /All connectivity checks passed/,  fail: /Source S3 connection error|Supabase connectivity check failed|MinIO connection error/ },
     { id: 'spark',        start: /Building SparkSession/,                                   done: /SparkSession created/,            fail: /SparkException|Failed to start Spark/ },
@@ -621,36 +1024,178 @@
     if (el) el.className = `step ${status}`;
   }
 
+  function resetSteps() {
+    STEPS.forEach(s => {
+      stepStatus[s.id] = 'pending';
+      const el = document.querySelector(`[data-step="${s.id}"]`);
+      if (el) el.className = 'step';
+    });
+  }
+
   function processLine(line) {
     for (let i = 0; i < STEPS.length; i++) {
       const s = STEPS[i];
       if (s.fail && s.fail.test(line)) { setStep(s.id, 'fail'); return; }
       if (s.done && s.done.test(line)) {
-        for (let j = 0; j <= i; j++) {
+        for (let j = 0; j <= i; j++)
           if (stepStatus[STEPS[j].id] === 'pending' || stepStatus[STEPS[j].id] === 'running')
             setStep(STEPS[j].id, 'done');
-        }
         return;
       }
       if (s.start && s.start.test(line)) {
-        for (let j = 0; j < i; j++) {
+        for (let j = 0; j < i; j++)
           if (stepStatus[STEPS[j].id] === 'pending' || stepStatus[STEPS[j].id] === 'running')
             setStep(STEPS[j].id, 'done');
-        }
         if (stepStatus[s.id] === 'pending') setStep(s.id, 'running');
         return;
       }
     }
   }
 
-  function resetSteps() {
-    STEPS.forEach(s => { setStep(s.id, 'pending'); stepStatus[s.id] = 'pending'; });
+  // ── Run History ──────────────────────────────────────────
+  let _historyOpen = false;
+  function toggleHistory() {
+    _historyOpen = !_historyOpen;
+    document.getElementById('history-list').style.display = _historyOpen ? 'block' : 'none';
+    document.getElementById('history-toggle-btn').textContent = _historyOpen ? 'Hide' : 'Show';
   }
 
-  // ── Form submit ────────────────────────────────────────────────────────────
+  async function loadHistory(appName, logFolder) {
+    if (!appName) return;
+    const list = document.getElementById('history-list');
+    list.innerHTML = '<span class="history-empty">Loading…</span>';
+    try {
+      const r    = await fetch(`/log-history?app_name=${encodeURIComponent(appName)}&log_folder=${encodeURIComponent(logFolder||'lake')}`);
+      const runs = await r.json();
+      if (!runs.length) { list.innerHTML = '<span class="history-empty">No previous runs found.</span>'; return; }
+      list.innerHTML = runs.map(run => `
+        <div class="history-row">
+          <div>
+            <span class="history-label">${run.label}</span>
+            <span class="history-meta">${(run.size/1024).toFixed(1)} KB</span>
+          </div>
+          <button class="btn-view-log" onclick="viewHistoricalLog('${encodeURIComponent(run.key)}','${run.label}')">View</button>
+        </div>`).join('');
+    } catch { list.innerHTML = '<span class="history-empty">Could not load history.</span>'; }
+  }
+
+  async function viewHistoricalLog(encodedKey, label) {
+    if (!_logOpen) toggleLogPanel();
+    document.getElementById('log-panel-title').textContent = label;
+    clearLog('Loading…');
+    _autoScroll = false;
+    try {
+      const r    = await fetch(`/view-log?key=${encodedKey}`);
+      const text = await r.text();
+      clearLog();
+      text.split('\n').forEach(line => appendLog(line));
+      document.getElementById('live-log').scrollTop = document.getElementById('live-log').scrollHeight;
+    } catch { clearLog('Failed to load log.'); }
+  }
+
+  // ── Combobox ─────────────────────────────────────────────
+  class Combobox {
+    constructor(inputId, fetchFn) {
+      this.input    = document.getElementById(inputId);
+      this.fetchFn  = fetchFn;
+      this.items    = [];
+      this._isOpen  = false;
+      this._init();
+    }
+
+    _init() {
+      const wrap = document.createElement('div');
+      wrap.className = 'combo-wrap';
+      this.input.parentNode.insertBefore(wrap, this.input);
+      wrap.appendChild(this.input);
+
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'combo-arrow';
+      btn.setAttribute('tabindex', '-1');
+      btn.textContent = '▾';
+      btn.addEventListener('mousedown', (e) => {
+        e.preventDefault();
+        this._isOpen ? this._hide() : this.refresh();
+      });
+      wrap.appendChild(btn);
+
+      this.dropdown = document.createElement('div');
+      this.dropdown.className = 'combo-dropdown';
+      wrap.appendChild(this.dropdown);
+
+      this.input.addEventListener('input', () => { if (this._isOpen) this._filter(); });
+      this.input.addEventListener('focus', () => { if (this.items.length) { this._filter(); this._show(); } });
+      document.addEventListener('click', (e) => { if (!wrap.contains(e.target)) this._hide(); });
+    }
+
+    async refresh() {
+      this._show();
+      this.dropdown.innerHTML = '<div class="combo-item combo-muted">Loading…</div>';
+      if (this.fetchFn) this.items = await this.fetchFn();
+      this._filter();
+    }
+
+    setItems(items) {
+      this.items = items;
+      if (this._isOpen) this._filter();
+    }
+
+    _filter() {
+      const q = this.input.value.toLowerCase();
+      const list = q ? this.items.filter(i => i.toLowerCase().includes(q)) : this.items;
+      if (!list.length) {
+        this.dropdown.innerHTML = '<div class="combo-item combo-muted">No items found</div>';
+      } else {
+        this.dropdown.innerHTML = list.slice(0, 150).map(
+          item => `<div class="combo-item" title="${item}">${item}</div>`
+        ).join('');
+        this.dropdown.querySelectorAll('.combo-item').forEach((el, i) => {
+          el.addEventListener('mousedown', (e) => {
+            e.preventDefault();
+            this.input.value = list[i];
+            this.input.dispatchEvent(new Event('input', { bubbles: true }));
+            this._hide();
+          });
+        });
+      }
+    }
+
+    _show() { this._isOpen = true;  this.dropdown.style.display = 'block'; }
+    _hide() { this._isOpen = false; this.dropdown.style.display = 'none';  }
+  }
+
+  // Source key combobox — loads keys from the entered source bucket
+  const sourceKeyCombo = new Combobox('source_key', async () => {
+    const bucket = document.getElementById('source_bucket').value.trim();
+    if (!bucket) return [];
+    try {
+      const r = await fetch(`/list-bucket-keys?bucket=${encodeURIComponent(bucket)}`);
+      return await r.json();
+    } catch { return []; }
+  });
+
+  // Reload source keys when bucket changes
+  document.getElementById('source_bucket').addEventListener('blur', () => {
+    const bucket = document.getElementById('source_bucket').value.trim();
+    if (!bucket) { sourceKeyCombo.setItems([]); return; }
+    sourceKeyCombo.refresh();
+  });
+
+  // Metadata key combobox — loads .csv files from metadata bucket
+  const metaKeyCombo = new Combobox('metadata_key', async () => {
+    try {
+      const r = await fetch('/list-metadata-keys');
+      return await r.json();
+    } catch { return []; }
+  });
+
+  // Pre-load metadata keys on page start
+  metaKeyCombo.refresh();
+
+  // ── Form submit ──────────────────────────────────────────
   document.getElementById('pipeline-form').addEventListener('submit', async (e) => {
     e.preventDefault();
-
     const form   = e.target;
     const btn    = document.getElementById('run-btn');
     const pCard  = document.getElementById('pipeline-card');
@@ -666,61 +1211,48 @@
     resetSteps();
     pCard.scrollIntoView({ behavior: 'smooth' });
 
-    // mark log toggle as "running"
+    document.getElementById('log-panel-title').textContent = 'Live Logs';
     document.getElementById('log-toggle-btn').classList.add('running');
-    logSeparator(`${form.application_name.value}  ${form.ingest_date.value}`);
+    clearLog('Starting pipeline…');
     _autoScroll = true;
 
     let fullLog = '';
-
     try {
       const res    = await fetch('/run', { method: 'POST', body: new FormData(form) });
       const reader = res.body.getReader();
       const dec    = new TextDecoder();
       let   buffer = '';
-
       while (true) {
         const { value, done } = await reader.read();
         if (done) break;
-
         buffer += dec.decode(value, { stream: true });
         const lines = buffer.split('\n');
         buffer = lines.pop();
-
-        for (const line of lines) {
-          fullLog += line + '\n';
-          processLine(line);
-          appendLog(line);
-        }
+        for (const line of lines) { fullLog += line + '\n'; processLine(line); appendLog(line); }
       }
       if (buffer) { fullLog += buffer; processLine(buffer); appendLog(buffer); }
 
-      const exitMatch = fullLog.match(/--- Exit (\d+) ---/);
-      const code = exitMatch ? parseInt(exitMatch[1]) : null;
-
+      const code = (m => m ? parseInt(m[1]) : null)(fullLog.match(/--- Exit (\d+) ---/));
       if (code === 0) {
-        dot.className      = 'dot ok';
-        status.textContent = 'Completed successfully';
+        dot.className = 'dot ok'; status.textContent = 'Completed successfully';
       } else {
-        dot.className      = 'dot err';
-        status.textContent = `Failed (exit ${code ?? 'unknown'})`;
+        dot.className = 'dot err'; status.textContent = `Failed (exit ${code ?? 'unknown'})`;
         STEPS.forEach(s => { if (stepStatus[s.id] === 'running') setStep(s.id, 'fail'); });
       }
     } catch (err) {
-      dot.className      = 'dot err';
-      status.textContent = `Error: ${err.message}`;
+      dot.className = 'dot err'; status.textContent = `Error: ${err.message}`;
       STEPS.forEach(s => { if (stepStatus[s.id] === 'running') setStep(s.id, 'fail'); });
     } finally {
       btn.disabled = false;
       document.getElementById('log-toggle-btn').classList.remove('running');
+      validateStages();
 
       const appName    = form.application_name.value;
       const ingestDate = form.ingest_date.value;
-      const logFolder  = form.log_folder.value || 'lake';
-      _logParams = { appName, ingestDate, logFolder };
-
+      const logFolder  = 'lake';
       dlBtn.href = `/download-log?app_name=${encodeURIComponent(appName)}&ingest_date=${encodeURIComponent(ingestDate)}&log_folder=${encodeURIComponent(logFolder)}`;
       dlBtn.classList.add('visible');
+      loadHistory(appName, logFolder);
     }
   });
 </script>

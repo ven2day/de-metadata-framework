@@ -46,8 +46,7 @@ def send_pipeline_notification(
           <h2 style="color:#dc2626">&#10007; Pipeline Failed</h2>
           <p><b>Application:</b> {app_name}</p>
           <p><b>Ingest Date:</b> {ingest_date}</p>
-          <p><b>Error:</b></p>
-          <pre style="background:#f3f4f6;padding:12px;border-radius:4px;font-size:12px">{error_msg or 'Unknown error'}</pre>
+          <p style="color:#6b7280">See the attached log file for details.</p>
         </div>
         """
 
