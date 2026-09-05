@@ -48,8 +48,8 @@ def write_to_minio(
     writer = (
         df.writeTo(full_table)
         .using("iceberg")
-        .option("location", meta_location)
         .tableProperty("write.data.path", data_path)
+        .tableProperty("write.meta.path", meta_location)
         .partitionedBy(*d.keys(), days("ingest_date"))
     )
     if mode.strip() == "append":
