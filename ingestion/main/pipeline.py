@@ -10,6 +10,7 @@ from ingestion.env.DE_Ingestion_properties import (
     MINIO_ACCESS_KEY,
     MINIO_SECRET_KEY,
     LOG_S3_BUCKET,
+    SOURCE_S3_BUCKET,
 )
 from ingestion.pyfiles.logger import get_logger, setup_log_file, close_log_file
 from ingestion.pyfiles.args_parser import parse_args
@@ -20,7 +21,7 @@ from ingestion.pyfiles.metadata_reader import read_metadata
 from ingestion.pyfiles.schema_validator import validate_schema
 from ingestion.pyfiles.type_caster import cast_columns
 from ingestion.pyfiles.pii_processor import apply_pii
-from ingestion.source.s3_reader import read_s3_file
+from ingestion.source.s3_reader import read_s3_file, resolve_s3_key
 from ingestion.source.supabase_reader import read_supabase_table
 from ingestion.sink.minio_writer import write_to_minio
 
@@ -40,14 +41,17 @@ def run_s3_pipeline(
 ) -> None:
     logger.info(
         "=== ETL Pipeline Start [app=%s, date=%s, source=s3://%s/%s] ===",
-        args.application_name, args.ingest_date, source_bucket, source_key,
+        args.application_name, args.ingest_date, source_bucket or SOURCE_S3_BUCKET, source_key,
     )
 
     run_all_checks(args, source_bucket=source_bucket, minio_bucket=output_bucket)
 
+    source_bucket = source_bucket or SOURCE_S3_BUCKET
+    resolved_key  = resolve_s3_key(source_bucket, source_key, args.ingest_date)
+
     spark = get_spark_session()
     metadata = read_metadata(spark, key=metadata_key)
-    df = read_s3_file(spark, source_key, bucket=source_bucket)
+    df = read_s3_file(spark, resolved_key, bucket=source_bucket)
 
     validate_schema(df, metadata)
     df = cast_columns(df, metadata)

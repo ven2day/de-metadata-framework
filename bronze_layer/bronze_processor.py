@@ -1,5 +1,6 @@
 from pyspark.sql import DataFrame, SparkSession
 from pyspark.sql import functions as F
+from pyspark.sql.functions import partitioning
 from pyspark.sql.window import Window
 
 from ingestion.env.DE_Ingestion_properties import (
@@ -74,7 +75,7 @@ def _write_bronze(
         .using("iceberg")
         .tableProperty("write.data.path", data_path)
         .tableProperty("write.meta.path", meta_path)
-        .partitionedBy(F.months("snapshot_date"))
+        .partitionedBy(partitioning.days("snapshot_date"))
     )
 
     if spark.catalog.tableExists(full_table):
@@ -95,8 +96,11 @@ def run_full(
     lake_db: str = LAKE_DATABASE,
     bronze_db: str = BRONZE_DATABASE,
 ) -> None:
-    lake_table = f"{catalog}.{lake_db}.{app_name}"
-    logger.info("=== Bronze FULL [app=%s, date=%s, source=%s] ===", app_name, run_date, lake_table)
+    lake_table   = f"{catalog}.{lake_db}.{app_name}"
+    bronze_table = f"{catalog}.{bronze_db}.{app_name}"
+    logger.info("=== Bronze FULL [app=%s, date=%s] ===", app_name, run_date)
+    logger.info("Lake table  : %s  (ingest_date = %s)", lake_table, run_date)
+    logger.info("Bronze table: %s  (snapshot_date = %s)", bronze_table, run_date)
 
     spark.sql(f"CREATE NAMESPACE IF NOT EXISTS {catalog}.{bronze_db}")
 
@@ -135,6 +139,7 @@ def run_delta(
     lake_table   = f"{catalog}.{lake_db}.{app_name}"
     bronze_table = f"{catalog}.{bronze_db}.{app_name}"
     logger.info("=== Bronze DELTA [app=%s, date=%s] ===", app_name, run_date)
+    logger.info("Lake table  : %s  (ingest_date = %s)", lake_table, run_date)
 
     spark.sql(f"CREATE NAMESPACE IF NOT EXISTS {catalog}.{bronze_db}")
 
@@ -145,37 +150,63 @@ def run_delta(
         .drop("ingest_date")
     )
     logger.info("Lake rows for run_date=%s: %d", run_date, df_new.count())
-
     df_new = _dedup(df_new, primary_keys, timestamp_col)
-    df_new = df_new.withColumn("snapshot_date", F.to_date(F.lit(run_date)))
 
     # Step 2: first-time run — bronze table doesn't exist yet, fall back to full write
     if not _bronze_table_exists(spark, bronze_table):
         logger.info("Bronze table does not exist yet — running initial full write")
+        df_new = df_new.withColumn("snapshot_date", F.to_date(F.lit(run_date)))
         _write_bronze(spark, df_new, app_name, catalog, bronze_db)
         logger.info("=== Bronze DELTA (initial) complete [app=%s, date=%s] ===", app_name, run_date)
         return
 
-    # Step 3: MERGE INTO existing bronze table
-    #   MATCHED     → UPDATE all columns (snapshot_date moves to run_date)
-    #   NOT MATCHED → INSERT new row
-    view = f"_bronze_src_{app_name}_{run_date.replace('-', '_')}"
-    df_new.createOrReplaceTempView(view)
+    # Step 3: find the latest snapshot strictly before run_date
+    row = spark.sql(f"""
+        SELECT MAX(snapshot_date) AS max_snap
+        FROM {bronze_table}
+        WHERE snapshot_date < '{run_date}'
+    """).collect()[0]
+    max_snap = row["max_snap"]
 
-    if not primary_keys:
-        raise ValueError(f"MERGE INTO requires at least one primary_key — none defined in metadata for '{app_name}'")
+    logger.info("Bronze table: %s  (snapshot_date = %s)", bronze_table, max_snap)
 
-    on_clause = " AND ".join(f"target.`{pk}` = source.`{pk}`" for pk in primary_keys)
 
-    merge_sql = f"""
-        MERGE INTO {bronze_table} AS target
-        USING {view} AS source
-        ON {on_clause}
-        WHEN MATCHED THEN UPDATE SET *
-        WHEN NOT MATCHED THEN INSERT *
-    """
+    if max_snap is None:
+        logger.info("No previous snapshot before %s — writing new partition as full snapshot", run_date)
+        df_new = df_new.withColumn("snapshot_date", F.to_date(F.lit(run_date)))
+        _write_bronze(spark, df_new, app_name, catalog, bronze_db)
+        logger.info("=== Bronze DELTA (no prior snapshot) complete [app=%s, date=%s] ===", app_name, run_date)
+        return
 
-    logger.info("MERGE INTO '%s' on primary_keys=%s", bronze_table, primary_keys)
-    spark.sql(merge_sql)
-    logger.info("MERGE INTO complete — '%s'", bronze_table)
+    # Step 4: read the previous snapshot and merge with the new lake batch
+    #   New lake records take priority over the previous snapshot on primary keys.
+    logger.info("Reading previous bronze snapshot at snapshot_date=%s", max_snap)
+    df_prev = (
+        spark.table(bronze_table)
+        .filter(F.col("snapshot_date") == F.lit(str(max_snap)))
+        .drop("snapshot_date")
+    )
+    logger.info("Previous snapshot rows: %d", df_prev.count())
+
+    if primary_keys:
+        # Tag sources: 0 = new (wins), 1 = previous (loses on conflict)
+        df_union = (
+            df_new.withColumn("_priority", F.lit(0))
+            .unionByName(df_prev.withColumn("_priority", F.lit(1)))
+        )
+        w = Window.partitionBy(*primary_keys).orderBy(F.col("_priority"))
+        df_merged = (
+            df_union
+            .withColumn("_rn", F.row_number().over(w))
+            .filter(F.col("_rn") == 1)
+            .drop("_rn", "_priority")
+        )
+    else:
+        logger.warning("No primary_key columns — merging by distinct union")
+        df_merged = df_new.unionByName(df_prev).distinct()
+
+    df_merged = df_merged.withColumn("snapshot_date", F.to_date(F.lit(run_date)))
+    logger.info("Merged snapshot rows: %d", df_merged.count())
+
+    _write_bronze(spark, df_merged, app_name, catalog, bronze_db)
     logger.info("=== Bronze DELTA complete [app=%s, date=%s] ===", app_name, run_date)

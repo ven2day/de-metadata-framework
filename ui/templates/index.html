@@ -152,12 +152,20 @@
       display: flex;
       gap: 18px;
       align-items: flex-start;
-      max-width: 860px;
+      max-width: 1360px;
       margin: 0 auto;
       transition: max-width 0.25s ease;
     }
-    .page-wrapper.logs-open { max-width: 1460px; }
-    .main-panel { flex: 1; min-width: 320px; }
+    .page-wrapper.logs-open { max-width: 1900px; }
+    .main-panel {
+      flex: 1; min-width: 0;
+      display: flex; gap: 16px; align-items: flex-start;
+    }
+    .mp-col-left {
+      width: 300px; flex-shrink: 0;
+      position: sticky; top: 24px;
+    }
+    .mp-col-right { flex: 1; min-width: 0; }
 
     /* ── Step accordion cards ── */
     .step-card {
@@ -320,7 +328,7 @@
 
     /* ── Run button ── */
     .btn-run {
-      width: 100%; padding: 13px;
+      padding: 13px;
       background: var(--amber); color: #fff;
       border: none; border-radius: var(--radius);
       font-size: 14px; font-weight: 700;
@@ -328,7 +336,6 @@
       transition: background 0.15s, box-shadow 0.15s, transform 0.1s;
       box-shadow: 0 3px 10px rgba(233,168,37,0.35);
       letter-spacing: 0.1px;
-      margin-bottom: 16px;
     }
     .btn-run:hover:not(:disabled) {
       background: var(--amber-h);
@@ -339,7 +346,6 @@
     .btn-run:disabled { opacity: 0.45; cursor: not-allowed; box-shadow: none; }
 
     /* ── Pipeline visualization ── */
-    #pipeline-card { display: none; }
     .pipeline-wrap {
       background: var(--surface);
       border-radius: var(--card-r);
@@ -459,6 +465,102 @@
     }
     .btn-view-log:hover { border-color: var(--amber); color: var(--amber); }
 
+    /* ── Scheduled jobs column ── */
+    .mp-col-schedule {
+      width: 260px; flex-shrink: 0;
+      position: sticky; top: 24px;
+    }
+    .sched-card {
+      background: var(--surface);
+      border-radius: var(--card-r);
+      box-shadow: var(--shadow);
+      overflow: hidden;
+    }
+    .sched-card-header {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 12px 16px 10px;
+      border-bottom: 1px solid rgba(0,0,0,0.05);
+    }
+    .sched-card-title {
+      font-size: 11px; font-weight: 700;
+      text-transform: uppercase; letter-spacing: 0.7px;
+      color: var(--muted);
+    }
+    .sched-empty {
+      padding: 24px 16px; text-align: center;
+      font-size: 12px; color: #bbb;
+    }
+    .sched-item {
+      display: flex; align-items: flex-start; gap: 8px;
+      padding: 10px 14px;
+      border-bottom: 1px solid rgba(0,0,0,0.04);
+      cursor: pointer;
+      transition: background 0.12s;
+    }
+    .sched-item:hover { background: rgba(0,0,0,0.025); }
+    .sched-item:last-child { border-bottom: none; }
+    .sched-item-body { flex: 1; min-width: 0; }
+    .sched-app {
+      font-size: 12px; font-weight: 600; color: var(--text);
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    }
+    .sched-cron {
+      font-size: 11px; color: var(--muted); font-family: var(--mono);
+      margin-top: 2px;
+    }
+    .sched-last {
+      font-size: 10px; margin-top: 3px;
+      color: var(--muted);
+    }
+    .sched-last.success { color: var(--green); }
+    .sched-last.failed  { color: var(--red); }
+    .sched-last.error   { color: var(--red); }
+    .btn-sched-del {
+      background: none; border: none; cursor: pointer;
+      font-size: 14px; color: #ccc; padding: 2px 4px; line-height: 1;
+      flex-shrink: 0; border-radius: 4px;
+      transition: color 0.15s, background 0.15s;
+    }
+    .btn-sched-del:hover { color: var(--red); background: rgba(239,68,68,.08); }
+
+    /* ── Schedule section in form ── */
+    .sched-section {
+      margin: 12px 0 4px;
+      padding: 12px 16px;
+      background: #f9f7f4;
+      border-radius: 8px;
+      border: 1px solid rgba(0,0,0,0.06);
+    }
+    .sched-toggle-row {
+      display: flex; align-items: center; gap: 8px;
+    }
+    .sched-toggle-row input[type="checkbox"] { width: 15px; height: 15px; cursor: pointer; accent-color: var(--accent); }
+    .sched-toggle-row label { font-size: 13px; font-weight: 500; color: var(--text); cursor: pointer; }
+    .sched-cron-wrap { margin-top: 10px; }
+    .sched-cron-wrap label { font-size: 11px; color: var(--muted); font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; display: block; margin-bottom: 4px; }
+    .sched-cron-wrap input {
+      width: 100%; font-family: var(--mono); font-size: 13px;
+      padding: 7px 10px; border: 1px solid #ddd; border-radius: 6px;
+      background: #fff; box-sizing: border-box;
+    }
+    .sched-cron-hint { font-size: 10px; color: #aaa; font-family: var(--mono); margin-top: 4px; display: block; }
+    .sched-cron-human { font-size: 11px; color: var(--accent); margin-top: 5px; display: block; font-style: italic; min-height: 16px; }
+    .sched-human { font-size: 11px; color: var(--muted); font-style: italic; margin-top: 2px; }
+
+    .run-actions { display: flex; gap: 10px; align-items: stretch; margin-bottom: 16px; }
+    .run-actions .btn-run,
+    .run-actions .btn-save-sched { flex: 1; margin-bottom: 0; }
+    .btn-save-sched {
+      padding: 13px; border-radius: var(--radius);
+      background: #1e1b18; color: #e8e0d4;
+      border: none; font-size: 14px; font-weight: 700;
+      cursor: pointer; white-space: nowrap;
+      transition: background 0.15s;
+      letter-spacing: 0.1px;
+    }
+    .btn-save-sched:hover:not(:disabled) { background: #2d2926; }
+    .btn-save-sched:disabled { opacity: 0.4; cursor: not-allowed; }
+
     /* ── Log panel (right) ── */
     .log-panel {
       display: none;
@@ -470,8 +572,24 @@
       border-radius: var(--card-r);
       overflow: hidden;
       box-shadow: 0 4px 24px rgba(0,0,0,0.18), 0 1px 4px rgba(0,0,0,0.12);
+      transition: height 0.2s ease;
     }
     .log-panel.open { display: flex; }
+
+    /* ── Minimized: collapse to header bar only ── */
+    .log-panel.minimized { height: auto; }
+    .log-panel.minimized #live-log,
+    .log-panel.minimized .log-search-bar { display: none !important; }
+
+    /* ── Maximized: full-screen overlay ── */
+    .log-panel.maximized {
+      position: fixed !important;
+      top: 0; left: 0;
+      width: 100vw !important;
+      height: 100dvh !important;
+      border-radius: 0;
+      z-index: 9000;
+    }
 
     .log-panel-header {
       display: flex; align-items: center; justify-content: space-between;
@@ -479,23 +597,78 @@
       border-bottom: 1px solid #252525;
       background: #161616;
       flex-shrink: 0;
+      position: relative; z-index: 1;
     }
     .log-panel-title {
       font-size: 11px; font-weight: 600;
       text-transform: uppercase; letter-spacing: 0.8px;
       color: #7a7a7a;
+      flex: 1;
     }
-    .log-panel-actions { display: flex; align-items: center; gap: 8px; }
-    #log-line-count { font-size: 11px; color: #444; font-family: var(--mono); }
-    .btn-log-clear {
+    .log-panel-actions { display: flex; align-items: center; gap: 6px; }
+    #log-line-count { font-size: 11px; color: #444; font-family: var(--mono); margin-right: 4px; }
+    .btn-log-icon {
       background: none; border: 1px solid #2d2d2d;
-      border-radius: 4px; padding: 3px 9px;
-      font-size: 11px; color: #666; cursor: pointer;
+      border-radius: 4px; padding: 3px 7px;
+      font-size: 12px; line-height: 1; color: #666; cursor: pointer;
+      transition: border-color 0.15s, color 0.15s, background 0.15s;
+      flex-shrink: 0;
     }
-    .btn-log-clear:hover { border-color: #555; color: #aaa; }
+    .btn-log-icon:hover  { border-color: #555; color: #bbb; }
+    .btn-log-icon.active { border-color: var(--amber); color: var(--amber); background: rgba(233,168,37,0.08); }
+
+    /* ── Search bar ── */
+    .log-search-bar {
+      display: none;
+      align-items: center; gap: 8px;
+      padding: 7px 14px;
+      background: #111111;
+      border-bottom: 1px solid #1e1e1e;
+      flex-shrink: 0;
+    }
+    .log-search-bar.open { display: flex; }
+
+    .log-search-input {
+      flex: 1; min-width: 0;
+      background: #1a1a1a;
+      border: 1px solid #333; border-radius: 4px;
+      color: #c9c9c9;
+      font-family: var(--mono); font-size: 11.5px;
+      padding: 4px 9px;
+      outline: none;
+      transition: border-color 0.15s;
+    }
+    .log-search-input:focus { border-color: var(--amber); }
+    .log-search-input::placeholder { color: #383838; }
+
+    .log-search-meta {
+      display: flex; align-items: center; gap: 6px; flex-shrink: 0;
+    }
+    .log-search-count {
+      font-size: 10.5px; color: #444;
+      font-family: var(--mono); white-space: nowrap; min-width: 64px; text-align: right;
+    }
+    .log-search-count.hit  { color: var(--amber); }
+    .log-search-count.miss { color: #7a3030; }
+
+    .btn-log-search-nav {
+      background: none; border: 1px solid #252525;
+      border-radius: 4px; padding: 2px 7px;
+      font-size: 11px; color: #555; cursor: pointer;
+      transition: border-color 0.15s, color 0.15s;
+    }
+    .btn-log-search-nav:hover { border-color: #444; color: #999; }
+    .btn-log-search-nav:disabled { opacity: 0.3; cursor: default; }
+
+    /* ── Match highlight ── */
+    .log-match {
+      background: rgba(233,168,37,0.28);
+      border-radius: 2px; padding: 0 1px;
+    }
+    .log-match.current { background: rgba(233,168,37,0.6); outline: 1px solid var(--amber); }
 
     #live-log {
-      flex: 1; overflow-y: auto;
+      flex: 1; min-height: 0; overflow-y: auto;
       padding: 10px 14px;
       font-family: var(--mono); font-size: 11.5px;
       line-height: 1.75; color: #c9c9c9;
@@ -545,6 +718,243 @@
     .combo-item:hover { background: rgba(233,168,37,0.08); color: var(--amber); }
     .combo-item.combo-muted { color: var(--muted); cursor: default; font-family: inherit; font-size: 11px; }
     .combo-item.combo-muted:hover { background: none; color: var(--muted); }
+
+    /* ── Bronze run button ── */
+    .btn-run-dark {
+      width: 100%; padding: 13px;
+      background: #1e1b18; color: #e9a825;
+      border: none; border-radius: var(--radius);
+      font-size: 14px; font-weight: 700;
+      cursor: pointer;
+      transition: background 0.15s, box-shadow 0.15s, transform 0.1s;
+      box-shadow: 0 3px 10px rgba(0,0,0,0.22);
+      letter-spacing: 0.1px;
+      margin-bottom: 16px;
+    }
+    .btn-run-dark:hover:not(:disabled) {
+      background: #2d2926;
+      box-shadow: 0 5px 18px rgba(0,0,0,0.32);
+      transform: translateY(-1px);
+    }
+    .btn-run-dark:active:not(:disabled) { transform: translateY(0); }
+    .btn-run-dark:disabled { opacity: 0.38; cursor: not-allowed; box-shadow: none; }
+
+    /* ── Run mode description ── */
+    .run-mode-desc {
+      font-size: 11px; color: var(--muted);
+      margin-top: 8px; line-height: 1.5;
+      min-height: 16px;
+    }
+
+    /* ── Layer navigation card ── */
+    .layer-nav-card {
+      background: var(--surface);
+      border-radius: var(--card-r);
+      box-shadow: var(--shadow);
+      padding: 14px 22px 18px;
+      margin-bottom: 16px;
+    }
+    .layer-nav-title {
+      font-size: 10px; font-weight: 700;
+      text-transform: uppercase; letter-spacing: 0.8px;
+      color: var(--muted); margin-bottom: 14px;
+    }
+    .layer-nav { display: flex; align-items: center; }
+
+    .layer-node {
+      display: flex; align-items: center; gap: 11px;
+      padding: 9px 13px;
+      border-radius: 10px; cursor: pointer;
+      border: 1.5px solid transparent;
+      transition: background 0.18s, border-color 0.18s;
+      user-select: none;
+    }
+    .layer-node:hover  { background: rgba(233,168,37,0.05); border-color: var(--border); }
+    .layer-node.active { background: rgba(233,168,37,0.09); border-color: var(--amber); }
+
+    .layer-node-dot {
+      width: 34px; height: 34px; border-radius: 50%;
+      background: #ede8e0; border: 2px solid #ddd8d0;
+      flex-shrink: 0;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 12px; font-weight: 700; color: var(--muted);
+      transition: background 0.3s, border-color 0.3s, color 0.3s;
+    }
+    .layer-node-dot.running {
+      background: var(--amber); border-color: var(--amber); color: transparent;
+      animation: pulse-ring 1s infinite;
+    }
+    .layer-node-dot.done {
+      background: var(--green); border-color: var(--green); color: #fff;
+      box-shadow: 0 2px 6px rgba(22,163,74,0.3);
+    }
+    .layer-node-dot.fail { background: var(--red); border-color: var(--red); color: #fff; }
+
+    .layer-node-text { display: flex; flex-direction: column; gap: 2px; }
+    .layer-node-name { font-size: 13px; font-weight: 600; color: var(--text); }
+    .layer-node-sub  { font-size: 10px; color: var(--muted); }
+
+    .layer-connector {
+      flex: 1; display: flex; align-items: center; gap: 4px;
+      padding: 0 10px; min-width: 60px;
+    }
+    .layer-connector-line {
+      flex: 1; height: 2px; background: var(--border);
+      transition: background 0.4s;
+      border-radius: 1px;
+    }
+    .layer-connector-line.done { background: var(--green); }
+    .layer-connector-arrow {
+      font-size: 10px; color: var(--muted); flex-shrink: 0;
+      transition: color 0.4s;
+    }
+    .layer-connector-arrow.done { color: var(--green); }
+
+    /* ── Vertical pipeline progress card ── */
+    .ps-card {
+      background: var(--surface);
+      border-radius: var(--card-r);
+      box-shadow: var(--shadow);
+      margin-bottom: 16px;
+      overflow: hidden;
+    }
+    .ps-card-header {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 13px 20px 11px;
+      border-bottom: 1px solid rgba(0,0,0,0.05);
+    }
+    .ps-card-title {
+      font-size: 10px; font-weight: 700;
+      text-transform: uppercase; letter-spacing: 0.8px;
+      color: var(--muted);
+    }
+    .ps-tabs {
+      display: inline-flex;
+      background: #f0ebe3; border-radius: 20px;
+      padding: 3px; gap: 2px;
+    }
+    .ps-tab {
+      padding: 5px 18px; cursor: pointer;
+      font-size: 11px; font-weight: 500;
+      color: var(--muted); border-radius: 17px;
+      background: none; border: none;
+      transition: background 0.18s, color 0.18s, box-shadow 0.18s;
+    }
+    .ps-tab.active {
+      background: var(--amber); color: #fff;
+      box-shadow: 0 2px 6px rgba(233,168,37,0.3);
+    }
+    .ps-steps-wrap { padding: 6px 0 8px; }
+    .ps-step {
+      display: flex; align-items: center; gap: 12px;
+      padding: 9px 16px;
+      border-bottom: 1px solid rgba(0,0,0,0.04);
+    }
+    .ps-step:last-child { border-bottom: none; }
+    .ps-dot {
+      width: 22px; height: 22px; border-radius: 50%; flex-shrink: 0;
+      background: #ede8e0; border: 2px solid #ddd8d0;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 9px; font-weight: 700; color: transparent;
+      transition: background 0.25s, border-color 0.25s, color 0.25s;
+    }
+    .ps-dot.running { background: var(--amber); border-color: var(--amber); animation: pulse-ring 1s infinite; }
+    .ps-dot.done    { background: var(--green); border-color: var(--green); color: #fff; box-shadow: 0 1px 4px rgba(22,163,74,.22); }
+    .ps-dot.fail    { background: var(--red);   border-color: var(--red);   color: #fff; }
+    .ps-label { flex: 1; font-size: 13px; font-weight: 500; color: var(--text); }
+    .ps-status { font-size: 11px; color: var(--muted); font-weight: 500; text-align: right; min-width: 54px; }
+    .ps-status.running { color: var(--amber); }
+    .ps-status.done    { color: var(--green); }
+    .ps-status.fail    { color: var(--red); }
+    .ps-run-footer {
+      display: flex; align-items: center; gap: 10px;
+      padding: 9px 20px 12px;
+      border-top: 1px solid rgba(0,0,0,0.05);
+    }
+    .ps-run-text { font-size: 12px; color: var(--muted); flex: 1; }
+
+    /* ── Scheduled Jobs overlay page ── */
+    .sj-overlay {
+      display: none; position: fixed; inset: 0; z-index: 200;
+      background: var(--bg); flex-direction: column;
+    }
+    .sj-overlay.open { display: flex; }
+    .sj-header {
+      display: flex; align-items: center; gap: 14px;
+      padding: 14px 28px; border-bottom: 1px solid var(--border);
+      background: #fff; flex-shrink: 0;
+    }
+    .sj-header-title { font-size: 16px; font-weight: 700; color: var(--text); flex: 1; }
+    .sj-body {
+      display: flex; flex: 1; overflow: hidden; gap: 0;
+    }
+    /* left: job list */
+    .sj-jobs-panel {
+      width: 300px; flex-shrink: 0; border-right: 1px solid var(--border);
+      overflow-y: auto; background: #faf9f7; display: flex; flex-direction: column;
+    }
+    .sj-jobs-panel-hdr {
+      padding: 14px 18px 10px; font-size: 11px; font-weight: 700;
+      text-transform: uppercase; letter-spacing: 0.5px; color: var(--muted);
+      border-bottom: 1px solid var(--border); flex-shrink: 0;
+    }
+    .sj-job-item {
+      padding: 12px 18px; border-bottom: 1px solid rgba(0,0,0,0.05);
+      cursor: pointer; transition: background 0.12s;
+    }
+    .sj-job-item:hover    { background: rgba(233,168,37,0.06); }
+    .sj-job-item.selected { background: rgba(233,168,37,0.13); border-left: 3px solid var(--amber); padding-left: 15px; }
+    .sj-job-name  { font-size: 13px; font-weight: 600; color: var(--text); }
+    .sj-job-cron  { font-size: 11px; color: var(--muted); font-family: var(--mono); margin-top: 2px; }
+    .sj-job-human { font-size: 11px; color: var(--accent); font-style: italic; margin-top: 1px; }
+    .sj-job-badge {
+      display: inline-block; margin-top: 4px; font-size: 10px; font-weight: 600;
+      padding: 1px 7px; border-radius: 20px; text-transform: uppercase;
+    }
+    .sj-job-badge.success { background: rgba(22,163,74,.12); color: var(--green); }
+    .sj-job-badge.failed  { background: rgba(239,68,68,.10); color: var(--red); }
+    .sj-job-badge.error   { background: rgba(239,68,68,.10); color: var(--red); }
+    .sj-job-badge.pending { background: rgba(0,0,0,.06); color: var(--muted); }
+    /* right: run history */
+    .sj-runs-panel {
+      flex: 1; overflow-y: auto; display: flex; flex-direction: column;
+    }
+    .sj-runs-panel-hdr {
+      padding: 14px 24px 10px; font-size: 11px; font-weight: 700;
+      text-transform: uppercase; letter-spacing: 0.5px; color: var(--muted);
+      border-bottom: 1px solid var(--border); flex-shrink: 0;
+      display: flex; align-items: center; gap: 10px;
+    }
+    .sj-runs-panel-hdr span { flex: 1; }
+    .sj-empty-runs {
+      padding: 40px 24px; text-align: center; color: var(--muted); font-size: 13px;
+    }
+    .sj-run-item {
+      border-bottom: 1px solid var(--border); padding: 0;
+    }
+    .sj-run-summary {
+      display: flex; align-items: center; gap: 12px; padding: 12px 24px;
+      cursor: pointer; transition: background 0.1s; user-select: none;
+    }
+    .sj-run-summary:hover { background: rgba(0,0,0,0.025); }
+    .sj-run-badge {
+      font-size: 10px; font-weight: 700; padding: 2px 9px; border-radius: 20px;
+      text-transform: uppercase; flex-shrink: 0;
+    }
+    .sj-run-badge.success { background: rgba(22,163,74,.12); color: var(--green); }
+    .sj-run-badge.failed  { background: rgba(239,68,68,.10); color: var(--red); }
+    .sj-run-badge.error   { background: rgba(239,68,68,.10); color: var(--red); }
+    .sj-run-date  { font-size: 13px; font-weight: 600; color: var(--text); flex: 1; }
+    .sj-run-time  { font-size: 11px; color: var(--muted); }
+    .sj-run-chevron { font-size: 11px; color: var(--muted); transition: transform 0.2s; }
+    .sj-run-chevron.open { transform: rotate(90deg); }
+    .sj-run-logs {
+      display: none; background: #1a1814; color: #d4cfc7;
+      font-family: var(--mono); font-size: 11px; line-height: 1.6;
+      padding: 14px 24px; white-space: pre-wrap; word-break: break-all;
+      max-height: 420px; overflow-y: auto;
+    }
+    .sj-run-logs.open { display: block; }
 
     /* ── Footer ── */
     .page-footer {
@@ -604,6 +1014,9 @@
       Live Logs
     </button>
 
+    <!-- Scheduled Jobs -->
+    <button class="top-btn" id="sched-page-btn" onclick="openSchedPage()">&#128197; Scheduled Jobs</button>
+
     <!-- Users (root only) -->
     {% if current_user.is_root %}
     <a href="{{ url_for('auth.users') }}" class="top-btn" style="text-decoration:none">Users</a>
@@ -617,6 +1030,29 @@
   </div>
 </div>
 
+<!-- ── Scheduled Jobs overlay ─────────────────────────────── -->
+<div class="sj-overlay" id="sj-overlay">
+  <div class="sj-header">
+    <span class="sj-header-title">&#128197; Scheduled Jobs</span>
+    <button class="top-btn" onclick="closeSchedPage()">✕ Close</button>
+  </div>
+  <div class="sj-body">
+    <!-- Job list -->
+    <div class="sj-jobs-panel">
+      <div class="sj-jobs-panel-hdr">All Schedules</div>
+      <div id="sj-job-list"><div class="sj-empty-runs">Loading…</div></div>
+    </div>
+    <!-- Run history -->
+    <div class="sj-runs-panel">
+      <div class="sj-runs-panel-hdr">
+        <span id="sj-runs-title">Select a job to view run history</span>
+        <button class="btn-log-icon" onclick="refreshSchedRuns()" title="Refresh">↺</button>
+      </div>
+      <div id="sj-run-list"><div class="sj-empty-runs">Select a scheduled job on the left.</div></div>
+    </div>
+  </div>
+</div>
+
 <!-- ── Page body ──────────────────────────────────────────── -->
 <div class="page-body">
 <div class="page-wrapper" id="page-wrapper">
@@ -624,12 +1060,96 @@
   <!-- ═══ Main panel ═══════════════════════════════════════ -->
   <div class="main-panel">
 
+    <!-- ── Left column: Pipeline progress ──────────────────── -->
+    <div class="mp-col-left">
+
+    <!-- ── Pipeline progress card ───────────────────────────── -->
+    <div class="ps-card" id="pipeline-progress-card">
+      <div class="ps-card-header">
+        <span class="ps-card-title">Pipeline Progress</span>
+        <div class="ps-tabs">
+          <button class="ps-tab active" id="ps-tab-ingestion" onclick="setPipelineTab('ingestion')">Ingestion</button>
+          <button class="ps-tab"        id="ps-tab-bronze"    onclick="setPipelineTab('bronze')">Bronze</button>
+        </div>
+      </div>
+
+      <!-- Ingestion steps -->
+      <div class="ps-steps-wrap" id="ps-ingestion">
+        <div class="ps-step"><div class="ps-dot" data-step="connectivity"></div><span class="ps-label">Connectivity</span><span class="ps-status" data-step="connectivity">—</span></div>
+        <div class="ps-step"><div class="ps-dot" data-step="spark"></div>        <span class="ps-label">Spark Session</span><span class="ps-status" data-step="spark">—</span></div>
+        <div class="ps-step"><div class="ps-dot" data-step="metadata"></div>     <span class="ps-label">Metadata</span>     <span class="ps-status" data-step="metadata">—</span></div>
+        <div class="ps-step"><div class="ps-dot" data-step="source"></div>       <span class="ps-label">Read Source</span>  <span class="ps-status" data-step="source">—</span></div>
+        <div class="ps-step"><div class="ps-dot" data-step="schema"></div>       <span class="ps-label">Schema Check</span> <span class="ps-status" data-step="schema">—</span></div>
+        <div class="ps-step"><div class="ps-dot" data-step="pii"></div>          <span class="ps-label">PII &amp; Types</span><span class="ps-status" data-step="pii">—</span></div>
+        <div class="ps-step"><div class="ps-dot" data-step="write"></div>        <span class="ps-label">Write Lake</span>   <span class="ps-status" data-step="write">—</span></div>
+        <div class="ps-step"><div class="ps-dot" data-step="complete"></div>     <span class="ps-label">Complete</span>     <span class="ps-status" data-step="complete">—</span></div>
+      </div>
+
+      <!-- Bronze steps -->
+      <div class="ps-steps-wrap" id="ps-bronze" style="display:none;">
+        <div class="ps-step"><div class="ps-dot" data-bstep="spark"></div>    <span class="ps-label">Spark Session</span><span class="ps-status" data-bstep="spark">—</span></div>
+        <div class="ps-step"><div class="ps-dot" data-bstep="metadata"></div> <span class="ps-label">Metadata</span>     <span class="ps-status" data-bstep="metadata">—</span></div>
+        <div class="ps-step"><div class="ps-dot" data-bstep="lake"></div>     <span class="ps-label">Read Lake</span>      <span class="ps-status" data-bstep="lake">—</span></div>
+        <div class="ps-step"><div class="ps-dot" data-bstep="snapshot"></div> <span class="ps-label">Read Snapshot</span>  <span class="ps-status" data-bstep="snapshot">—</span></div>
+        <div class="ps-step"><div class="ps-dot" data-bstep="dedup"></div>    <span class="ps-label">Dedup</span>          <span class="ps-status" data-bstep="dedup">—</span></div>
+        <div class="ps-step"><div class="ps-dot" data-bstep="write"></div>    <span class="ps-label">Write / Merge</span><span class="ps-status" data-bstep="write">—</span></div>
+        <div class="ps-step"><div class="ps-dot" data-bstep="complete"></div> <span class="ps-label">Complete</span>     <span class="ps-status" data-bstep="complete">—</span></div>
+      </div>
+
+      <!-- Status footers -->
+      <div class="ps-run-footer" id="ps-footer-ingestion">
+        <div class="dot" id="dot"></div>
+        <span class="ps-run-text" id="status-text">Idle</span>
+        <a class="btn-action" id="download-btn" href="#">&#8595;&nbsp;Download Log</a>
+      </div>
+      <div class="ps-run-footer" id="ps-footer-bronze" style="display:none;">
+        <div class="dot" id="bronze-dot"></div>
+        <span class="ps-run-text" id="bronze-status-text">Idle</span>
+        <a class="btn-action" id="bronze-download-btn" href="#">&#8595;&nbsp;Download Log</a>
+      </div>
+    </div><!-- /ps-card -->
+
+    </div><!-- /mp-col-left -->
+
+    <!-- ── Right column: forms + history ──────────────────── -->
+    <div class="mp-col-right">
+
+    <!-- ── Layer navigation ─────────────────────────────────── -->
+    <div class="layer-nav-card">
+      <div class="layer-nav-title">Pipeline</div>
+      <div class="layer-nav">
+        <div class="layer-node active" id="nav-ingestion" onclick="setLayer('ingestion')">
+          <div class="layer-node-dot" id="nav-dot-ingestion">1</div>
+          <div class="layer-node-text">
+            <span class="layer-node-name">Ingestion</span>
+            <span class="layer-node-sub">Lake Layer</span>
+          </div>
+        </div>
+        <div class="layer-connector">
+          <div class="layer-connector-line" id="connector-line-l"></div>
+          <span class="layer-connector-arrow" id="connector-arrow">▶</span>
+          <div class="layer-connector-line" id="connector-line-r"></div>
+        </div>
+        <div class="layer-node" id="nav-bronze" onclick="setLayer('bronze')">
+          <div class="layer-node-dot" id="nav-dot-bronze">2</div>
+          <div class="layer-node-text">
+            <span class="layer-node-name">Bronze Layer</span>
+            <span class="layer-node-sub">Dedup &amp; Merge</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── Ingestion panel ──────────────────────────────────── -->
+    <div id="panel-ingestion">
+
     <form id="pipeline-form">
       <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
       <input type="hidden" name="log_folder"  id="log_folder"  value="lake" />
       <input type="hidden" name="log_level"   id="log_level"   value="INFO" />
       <input type="hidden" name="write_mode"  id="write_mode"  value="overwrite" />
       <input type="hidden" name="output_catalog" id="output_catalog" value="minio" />
+      <input type="hidden" name="output_database" id="output_database" value="de_lake" />
 
       <!-- ── Step 1: Application ─────────────────────────── -->
       <div class="step-card" id="step-card-1">
@@ -647,7 +1167,7 @@
         </div>
         <div class="step-body" id="step-body-1">
           <div class="grid">
-            <div class="field">
+            <div class="field full">
               <label for="application_name">Application Name</label>
               <input type="text" id="application_name" name="application_name"
                      placeholder="e.g. enigma_covid_19_us_states" />
@@ -655,6 +1175,14 @@
             <div class="field">
               <label for="ingest_date">Run Date</label>
               <input type="date" id="ingest_date" name="ingest_date" />
+            </div>
+            <div class="field">
+              <label>Write Mode</label>
+              <select id="write_mode_sel" onchange="document.getElementById('write_mode').value=this.value">
+                <option value="overwrite" selected>overwrite</option>
+                <option value="append">append</option>
+                <option value="replace">replace</option>
+              </select>
             </div>
           </div>
         </div>
@@ -719,65 +1247,6 @@
         </div>
       </div>
 
-      <!-- ── Step 3: Target ──────────────────────────────── -->
-      <div class="step-card" id="step-card-3">
-        <div class="step-header" onclick="toggleStep(3)">
-          <div class="step-num">3</div>
-          <div class="step-info">
-            <div class="step-name">Target</div>
-            <div class="step-desc">Iceberg catalog, database, and table</div>
-          </div>
-          <div class="step-badge" id="step-badge-3">
-            <div class="badge-dot"></div>
-            <span class="badge-label">Incomplete</span>
-          </div>
-          <div class="step-chevron" id="step-chevron-3">▾</div>
-        </div>
-        <div class="step-body collapsed" id="step-body-3">
-          <div class="grid">
-            <div class="field">
-              <label for="output_catalog_display">Catalog</label>
-              <input type="text" id="output_catalog_display" placeholder="minio"
-                     oninput="document.getElementById('output_catalog').value=this.value||'minio'" />
-            </div>
-            <div class="field">
-              <label for="output_database">Database</label>
-              <input type="text" id="output_database" name="output_database"
-                     placeholder="default" />
-            </div>
-            <div class="field full">
-              <label for="output_table_name">
-                Table Name
-                <span class="auto-tag" id="auto-tag" style="display:none">auto</span>
-              </label>
-              <input type="text" id="output_table_name" name="output_table_name"
-                     placeholder="auto from application name" />
-            </div>
-          </div>
-
-          <!-- Advanced config (write mode, log level) -->
-          <div class="grid" style="margin-top:6px;">
-            <div class="field">
-              <label>Write Mode</label>
-              <select id="write_mode_sel" onchange="document.getElementById('write_mode').value=this.value">
-                <option value="overwrite" selected>overwrite</option>
-                <option value="append">append</option>
-                <option value="replace">replace</option>
-              </select>
-            </div>
-            <div class="field">
-              <label>Log Level</label>
-              <select id="log_level_sel" onchange="document.getElementById('log_level').value=this.value">
-                <option value="INFO" selected>INFO</option>
-                <option value="DEBUG">DEBUG</option>
-                <option value="WARNING">WARNING</option>
-                <option value="ERROR">ERROR</option>
-              </select>
-            </div>
-          </div>
-        </div>
-      </div>
-
       <!-- ── Stage checklist summary ─────────────────────── -->
       <div class="stage-summary">
         <div class="stage-summary-title">Ready to run?</div>
@@ -791,35 +1260,31 @@
           <span class="summary-label">Source Details</span>
           <span class="summary-status" id="sum-status-2">Incomplete</span>
         </div>
-        <div class="summary-row">
-          <div class="summary-dot" id="sum-dot-3"></div>
-          <span class="summary-label">Target Details</span>
-          <span class="summary-status" id="sum-status-3">Incomplete</span>
+      </div>
+
+      <!-- ── Schedule section ────────────────────────────── -->
+      <div class="sched-section">
+        <div class="sched-toggle-row">
+          <input type="checkbox" id="sched-enable" onchange="toggleSchedSection(this)" />
+          <label for="sched-enable">Schedule this job</label>
+        </div>
+        <div class="sched-cron-wrap" id="sched-cron-wrap" style="display:none;">
+          <label for="sched-cron">Cron Expression</label>
+          <input type="text" id="sched-cron" placeholder="0 2 * * *"
+                 oninput="validateCronInput(this)" />
+          <span class="sched-cron-hint" id="sched-cron-hint">min &nbsp; hour &nbsp; day &nbsp; month &nbsp; weekday</span>
+          <span class="sched-cron-human" id="sched-cron-human"></span>
         </div>
       </div>
 
-      <button type="submit" class="btn-run" id="run-btn" disabled>&#9654;&nbsp; Run Pipeline</button>
+      <div class="run-actions">
+        <button type="submit" class="btn-run" id="run-btn" disabled>&#9654;&nbsp; Run Pipeline</button>
+        <button type="button" class="btn-save-sched" id="save-sched-btn"
+                style="display:none;" disabled onclick="saveSchedule()">
+          &#128197;&nbsp; Save Schedule
+        </button>
+      </div>
     </form>
-
-    <!-- ── Pipeline visualization ────────────────────────── -->
-    <div class="pipeline-wrap" id="pipeline-card" style="display:none;">
-      <div class="pipeline-title">Pipeline Progress</div>
-      <div class="pipeline" id="pipeline-steps">
-        <div class="step" data-step="connectivity"><div class="step-dot"></div><div class="step-label">Connectivity</div></div>
-        <div class="step" data-step="spark">        <div class="step-dot"></div><div class="step-label">Spark Session</div></div>
-        <div class="step" data-step="metadata">     <div class="step-dot"></div><div class="step-label">Metadata</div></div>
-        <div class="step" data-step="source">       <div class="step-dot"></div><div class="step-label">Read Source</div></div>
-        <div class="step" data-step="schema">       <div class="step-dot"></div><div class="step-label">Schema Check</div></div>
-        <div class="step" data-step="pii">          <div class="step-dot"></div><div class="step-label">PII &amp; Types</div></div>
-        <div class="step" data-step="write">        <div class="step-dot"></div><div class="step-label">Write</div></div>
-        <div class="step" data-step="complete">     <div class="step-dot"></div><div class="step-label">Complete</div></div>
-      </div>
-      <div id="job-status">
-        <div class="dot" id="dot"></div>
-        <span id="status-text">Running…</span>
-        <a class="btn-action" id="download-btn" href="#">&#8595;&nbsp;Download Log</a>
-      </div>
-    </div>
 
     <!-- ── Run History ──────────────────────────────────── -->
     <div class="history-wrap" id="history-card">
@@ -832,17 +1297,117 @@
       </div>
     </div>
 
+    </div><!-- /panel-ingestion -->
+
+    <!-- ── Bronze panel ─────────────────────────────────────── -->
+    <div id="panel-bronze" style="display:none;">
+
+    <!-- ── Bronze form ────────────────────────────────────── -->
+    <form id="bronze-form">
+      <input type="hidden" name="csrf_token"   value="{{ csrf_token() }}">
+      <input type="hidden" name="log_folder"   value="bronze">
+      <input type="hidden" name="log_level"    value="INFO">
+      <input type="hidden" name="metadata_key" id="bronze_metadata_key" value="">
+
+      <div class="step-card">
+        <div class="step-header" style="cursor:default;">
+          <div class="step-num" style="background:#1e1b18; box-shadow:0 2px 6px rgba(0,0,0,0.25);">B</div>
+          <div class="step-info">
+            <div class="step-name">Bronze Layer</div>
+            <div class="step-desc">Deduplication and merge from lake to bronze Iceberg table</div>
+          </div>
+          <div class="step-badge" id="bronze-ready-badge">
+            <div class="badge-dot"></div>
+            <span class="badge-label">Waiting</span>
+          </div>
+        </div>
+        <div class="step-body">
+          <div class="grid">
+            <div class="field">
+              <label>Application <span class="auto-tag">from Step 1</span></label>
+              <input type="text" id="bronze_app_name" name="application_name"
+                     placeholder="—" readonly
+                     style="background:#f5f3f0; color:var(--muted); cursor:default;" />
+            </div>
+            <div class="field">
+              <label>Run Date <span class="auto-tag">from Step 1</span></label>
+              <input type="text" id="bronze_run_date" name="run_date"
+                     placeholder="—" readonly
+                     style="background:#f5f3f0; color:var(--muted); cursor:default;" />
+            </div>
+          </div>
+
+          <div style="margin-top:16px;">
+            <label style="font-size:11px; font-weight:600; text-transform:uppercase; letter-spacing:0.6px; color:var(--muted);">Run Mode</label>
+            <div class="src-toggle" style="margin-top:8px; margin-bottom:0;">
+              <input type="radio" name="run_type" id="rt-full"  value="full"  checked />
+              <label for="rt-full">Full Load</label>
+              <input type="radio" name="run_type" id="rt-delta" value="delta" />
+              <label for="rt-delta">Delta</label>
+            </div>
+            <div class="run-mode-desc" id="run-mode-desc">
+              Reads lake data for run date, deduplicates, and overwrites the bronze partition.
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <button type="submit" class="btn-run-dark" id="bronze-run-btn" disabled>
+        &#9654;&nbsp; Run Bronze Pipeline
+      </button>
+    </form>
+
+    <!-- ── Bronze run history ─────────────────────────────── -->
+    <div class="history-wrap" id="bronze-history-card">
+      <div class="history-header">
+        <div class="history-title">Bronze Run History</div>
+        <button type="button" class="btn-history-toggle" id="bronze-history-toggle-btn" onclick="toggleBronzeHistory()">Show</button>
+      </div>
+      <div class="history-body" id="bronze-history-list" style="display:none;">
+        <span class="history-empty">Enter an application name to load history.</span>
+      </div>
+    </div>
+
+    </div><!-- /panel-bronze -->
+
+    </div><!-- /mp-col-right -->
+
+    <!-- ── Right column: scheduled jobs ──────────────────── -->
+    <div class="mp-col-schedule">
+      <div class="sched-card">
+        <div class="sched-card-header">
+          <span class="sched-card-title">Scheduled Jobs</span>
+          <button type="button" class="btn-log-icon" onclick="loadScheduledJobs()" title="Refresh">↺</button>
+        </div>
+        <div id="sched-list"><div class="sched-empty">No scheduled jobs.</div></div>
+      </div>
+    </div><!-- /mp-col-schedule -->
+
   </div><!-- /main-panel -->
 
   <!-- ═══ Log panel (right) ════════════════════════════════ -->
   <div class="log-panel" id="log-panel">
+
     <div class="log-panel-header">
       <span class="log-panel-title" id="log-panel-title">Live Logs</span>
       <div class="log-panel-actions">
         <span id="log-line-count">0 lines</span>
-        <button class="btn-log-clear" onclick="clearLog()">Clear</button>
+        <button class="btn-log-icon" id="btn-log-search"   title="Search logs (Ctrl+F)"  onclick="toggleLogSearch()">⌕</button>
+        <button class="btn-log-icon" id="btn-log-minimize" title="Minimize"               onclick="toggleMinimizeLog()">−</button>
+        <button class="btn-log-icon" id="btn-log-maximize" title="Maximise"               onclick="toggleMaximizeLog()">⤢</button>
+        <button class="btn-log-icon"                       title="Clear logs"             onclick="clearLog()">Clear</button>
       </div>
     </div>
+
+    <div class="log-search-bar" id="log-search-bar">
+      <input  type="text" class="log-search-input" id="log-search-input" placeholder="Search logs…" autocomplete="off" spellcheck="false" />
+      <div class="log-search-meta">
+        <button class="btn-log-search-nav" id="btn-prev-match" title="Previous match" onclick="stepMatch(-1)">▲</button>
+        <button class="btn-log-search-nav" id="btn-next-match" title="Next match"     onclick="stepMatch(1)">▼</button>
+        <span class="log-search-count" id="log-search-count"></span>
+      </div>
+    </div>
+
     <pre id="live-log"><span class="log-empty">Logs will stream here when a job runs.</span></pre>
   </div>
 
@@ -852,6 +1417,43 @@
 <div class="page-footer">© 2026 DE Metadata Framework &nbsp;·&nbsp; Internal Use Only</div>
 
 <script>
+  // ── Layer navigation ─────────────────────────────────────
+  let _activeLayer = 'ingestion';
+
+  function setLayer(layer) {
+    _activeLayer = layer;
+    document.getElementById('panel-ingestion').style.display = layer === 'ingestion' ? '' : 'none';
+    document.getElementById('panel-bronze').style.display    = layer === 'bronze'    ? '' : 'none';
+    document.getElementById('nav-ingestion').classList.toggle('active', layer === 'ingestion');
+    document.getElementById('nav-bronze').classList.toggle('active',    layer === 'bronze');
+  }
+
+  function setNavDot(layer, state) {
+    const el  = document.getElementById(`nav-dot-${layer}`);
+    const num = layer === 'ingestion' ? '1' : '2';
+    el.className = `layer-node-dot${state ? ' ' + state : ''}`;
+    el.textContent = state === 'done' ? '✓' : state === 'fail' ? '✕' : state === 'running' ? '' : num;
+  }
+
+  function setConnector(state) {
+    const line1  = document.getElementById('connector-line-l');
+    const line2  = document.getElementById('connector-line-r');
+    const arrow  = document.getElementById('connector-arrow');
+    [line1, line2].forEach(el => el.classList.toggle('done', state === 'done'));
+    arrow.classList.toggle('done', state === 'done');
+  }
+
+  // ── Pipeline progress tab switcher ───────────────────────
+  function setPipelineTab(tab) {
+    const isIngestion = tab === 'ingestion';
+    document.getElementById('ps-ingestion').style.display     = isIngestion ? '' : 'none';
+    document.getElementById('ps-bronze').style.display        = isIngestion ? 'none' : '';
+    document.getElementById('ps-footer-ingestion').style.display = isIngestion ? '' : 'none';
+    document.getElementById('ps-footer-bronze').style.display    = isIngestion ? 'none' : '';
+    document.getElementById('ps-tab-ingestion').classList.toggle('active', isIngestion);
+    document.getElementById('ps-tab-bronze').classList.toggle('active', !isIngestion);
+  }
+
   // ── Connectivity ─────────────────────────────────────────
   async function checkConnectivity() {
     const setConn = (svc, state, label) => {
@@ -887,6 +1489,74 @@
 
   let _lineCount = 0, _autoScroll = true;
 
+  // ── Search state ─────────────────────────────────────────
+  let _searchQuery  = '';
+  let _matchSpans   = [];
+  let _matchCurrent = -1;
+
+  function _escapeRe(s) { return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); }
+
+  function _applySearchToSpan(span) {
+    const raw = span.dataset.raw || span.textContent;
+    span.dataset.raw = raw;
+    if (!_searchQuery) {
+      span.style.display = '';
+      span.innerHTML = '';
+      span.textContent = raw;
+      return true;
+    }
+    const re = new RegExp(_escapeRe(_searchQuery), 'gi');
+    if (!re.test(raw)) { span.style.display = 'none'; return false; }
+    span.style.display = '';
+    span.innerHTML = raw.replace(
+      new RegExp(_escapeRe(_searchQuery), 'gi'),
+      m => `<mark class="log-match">${m}</mark>`
+    );
+    return true;
+  }
+
+  function _rebuildMatchList() {
+    _matchSpans   = Array.from(document.getElementById('live-log').querySelectorAll('.log-match'));
+    _matchCurrent = _matchSpans.length ? 0 : -1;
+    _updateMatchNav();
+  }
+
+  function _updateMatchNav() {
+    const total = _matchSpans.length;
+    const el    = document.getElementById('log-search-count');
+    if (!_searchQuery)    { el.textContent = ''; el.className = 'log-search-count'; }
+    else if (!total)      { el.textContent = 'no matches'; el.className = 'log-search-count miss'; }
+    else {
+      el.textContent = `${_matchCurrent + 1} / ${total}`;
+      el.className   = 'log-search-count hit';
+    }
+    document.getElementById('btn-prev-match').disabled = total === 0;
+    document.getElementById('btn-next-match').disabled = total === 0;
+  }
+
+  function _scrollToCurrentMatch() {
+    document.querySelectorAll('.log-match.current').forEach(m => m.classList.remove('current'));
+    if (_matchCurrent >= 0 && _matchSpans[_matchCurrent]) {
+      _matchSpans[_matchCurrent].classList.add('current');
+      _matchSpans[_matchCurrent].scrollIntoView({ block: 'center' });
+    }
+  }
+
+  function stepMatch(dir) {
+    if (!_matchSpans.length) return;
+    _matchCurrent = (_matchCurrent + dir + _matchSpans.length) % _matchSpans.length;
+    _updateMatchNav();
+    _scrollToCurrentMatch();
+  }
+
+  function applyLogSearch() {
+    const pre = document.getElementById('live-log');
+    pre.querySelectorAll('.ll').forEach(s => _applySearchToSpan(s));
+    _rebuildMatchList();
+    _scrollToCurrentMatch();
+  }
+
+  // ── appendLog / clearLog ─────────────────────────────────
   function appendLog(line) {
     const pre   = document.getElementById('live-log');
     const empty = pre.querySelector('.log-empty');
@@ -894,7 +1564,8 @@
     if (!line) return;
     _lineCount++;
     const span  = document.createElement('span');
-    span.className = 'll';
+    span.className   = 'll';
+    span.dataset.raw = line + '\n';
     const lower = line.toLowerCase();
     if (/\b(error|exception|failed|fail)\b/.test(lower))          span.classList.add('err');
     else if (/\b(warn|warning)\b/.test(lower))                    span.classList.add('warn');
@@ -902,6 +1573,17 @@
     else if (/^(22\/|23\/|\s+at |py4j|spark\.|hadoop\.|java\.)/.test(line.trimStart())) span.classList.add('dim');
     span.textContent = line + '\n';
     pre.appendChild(span);
+
+    if (_searchQuery) {
+      const matched = _applySearchToSpan(span);
+      if (matched) {
+        const newMarks = span.querySelectorAll('.log-match');
+        _matchSpans.push(...newMarks);
+        if (_matchCurrent === -1) _matchCurrent = 0;
+        _updateMatchNav();
+      }
+    }
+
     if (_autoScroll) pre.scrollTop = pre.scrollHeight;
     document.getElementById('log-line-count').textContent = `${_lineCount} lines`;
   }
@@ -909,13 +1591,85 @@
   function clearLog(placeholder) {
     const pre = document.getElementById('live-log');
     pre.innerHTML = `<span class="log-empty">${placeholder || 'Logs will stream here when a job runs.'}</span>`;
-    _lineCount = 0;
+    _lineCount    = 0;
+    _matchSpans   = [];
+    _matchCurrent = -1;
+    _searchQuery  = '';
+    document.getElementById('log-search-input').value = '';
     document.getElementById('log-line-count').textContent = '0 lines';
+    _updateMatchNav();
   }
 
   document.getElementById('live-log').addEventListener('scroll', () => {
     const el = document.getElementById('live-log');
     _autoScroll = el.scrollTop + el.clientHeight >= el.scrollHeight - 8;
+  });
+
+  // ── Minimize / Maximize ──────────────────────────────────
+  let _logMinimized = false;
+  let _logMaximized = false;
+
+  function toggleMinimizeLog() {
+    if (_logMaximized) toggleMaximizeLog();
+    _logMinimized = !_logMinimized;
+    document.getElementById('log-panel').classList.toggle('minimized', _logMinimized);
+    const btn = document.getElementById('btn-log-minimize');
+    btn.textContent = _logMinimized ? '+' : '−';
+    btn.title       = _logMinimized ? 'Restore' : 'Minimize';
+    btn.classList.toggle('active', _logMinimized);
+  }
+
+  function toggleMaximizeLog() {
+    if (_logMinimized) { _logMinimized = false; document.getElementById('log-panel').classList.remove('minimized'); }
+    _logMaximized = !_logMaximized;
+    document.getElementById('log-panel').classList.toggle('maximized', _logMaximized);
+    const btn = document.getElementById('btn-log-maximize');
+    btn.textContent = _logMaximized ? '⤡' : '⤢';
+    btn.title       = _logMaximized ? 'Restore' : 'Maximise';
+    btn.classList.toggle('active', _logMaximized);
+    if (_logMaximized && _autoScroll)
+      document.getElementById('live-log').scrollTop = document.getElementById('live-log').scrollHeight;
+  }
+
+  // ── Search toggle ────────────────────────────────────────
+  let _logSearchOpen = false;
+
+  function toggleLogSearch() {
+    _logSearchOpen = !_logSearchOpen;
+    document.getElementById('log-search-bar').classList.toggle('open', _logSearchOpen);
+    document.getElementById('btn-log-search').classList.toggle('active', _logSearchOpen);
+    if (_logSearchOpen) {
+      document.getElementById('log-search-input').focus();
+    } else {
+      _closeLogSearch();
+    }
+  }
+
+  function _closeLogSearch() {
+    _searchQuery = '';
+    document.getElementById('log-search-input').value = '';
+    applyLogSearch();
+  }
+
+  document.getElementById('log-search-input').addEventListener('input', function () {
+    _searchQuery = this.value;
+    applyLogSearch();
+  });
+
+  document.getElementById('log-search-input').addEventListener('keydown', function (e) {
+    if (e.key === 'Escape')  { toggleLogSearch(); }
+    if (e.key === 'Enter')   { stepMatch(e.shiftKey ? -1 : 1); }
+    if (e.key === 'F3')      { e.preventDefault(); stepMatch(e.shiftKey ? -1 : 1); }
+  });
+
+  document.addEventListener('keydown', function (e) {
+    if ((e.ctrlKey || e.metaKey) && e.key === 'f' && _logOpen) {
+      e.preventDefault();
+      if (!_logSearchOpen) toggleLogSearch();
+      else document.getElementById('log-search-input').focus();
+    }
+    if (e.key === 'Escape' && _logMaximized) toggleMaximizeLog();
+    if (e.key === 'Escape' && document.getElementById('sj-overlay').classList.contains('open')) closeSchedPage();
   });
 
   // ── Source toggle ────────────────────────────────────────
@@ -948,13 +1702,12 @@
       if (s3) return val('source_bucket') !== '' && val('source_key') !== '' && meta;
       return val('source_table_name') !== '' && meta;
     }
-    if (n === 3) return val('output_database') !== '';
     return false;
   }
 
   function validateStages() {
     let allValid = true;
-    for (let n = 1; n <= 3; n++) {
+    for (let n = 1; n <= 2; n++) {
       const valid   = getStageValid(n);
       if (!valid) allValid = false;
 
@@ -974,28 +1727,16 @@
   }
 
   // Watch all required inputs
-  ['application_name','ingest_date','source_bucket','source_key','source_table_name','metadata_key','output_database','output_table_name']
+  ['application_name','ingest_date','source_bucket','source_key','source_table_name','metadata_key']
     .forEach(id => {
       const el = document.getElementById(id);
       if (el) el.addEventListener('input', validateStages);
     });
 
-  // ── Auto-fill table name from application name ────────────
-  let _tableManual = false;
   document.getElementById('application_name').addEventListener('input', function () {
-    const slug = this.value.toLowerCase().replace(/[\s\-]+/g, '_').replace(/[^a-z0-9_]/g, '');
-    const tbl  = document.getElementById('output_table_name');
-    if (!_tableManual) {
-      tbl.value = slug;
-      document.getElementById('auto-tag').style.display = slug ? 'inline' : 'none';
-    }
     validateStages();
     loadHistory(this.value.trim(), 'lake');
-  });
-  document.getElementById('output_table_name').addEventListener('input', function () {
-    _tableManual = this.value.length > 0;
-    document.getElementById('auto-tag').style.display = _tableManual ? 'none' : 'inline';
-    validateStages();
+    _updateSchedBtnLabel();
   });
 
   // Default date
@@ -1017,18 +1758,26 @@
   const stepStatus = {};
   STEPS.forEach(s => stepStatus[s.id] = 'pending');
 
+  function _psLabel(status) {
+    return { running: 'Running…', done: 'Done', fail: 'Failed' }[status] || '—';
+  }
+
   function setStep(id, status) {
     if (stepStatus[id] === 'fail') return;
     stepStatus[id] = status;
-    const el = document.querySelector(`[data-step="${id}"]`);
-    if (el) el.className = `step ${status}`;
+    const dot = document.querySelector(`#ps-ingestion .ps-dot[data-step="${id}"]`);
+    const lbl = document.querySelector(`#ps-ingestion .ps-status[data-step="${id}"]`);
+    if (dot) { dot.className = `ps-dot ${status}`; dot.setAttribute('data-step', id); }
+    if (lbl) { lbl.className = `ps-status ${status}`; lbl.textContent = _psLabel(status); }
   }
 
   function resetSteps() {
     STEPS.forEach(s => {
       stepStatus[s.id] = 'pending';
-      const el = document.querySelector(`[data-step="${s.id}"]`);
-      if (el) el.className = 'step';
+      const dot = document.querySelector(`#ps-ingestion .ps-dot[data-step="${s.id}"]`);
+      const lbl = document.querySelector(`#ps-ingestion .ps-status[data-step="${s.id}"]`);
+      if (dot) { dot.className = 'ps-dot'; }
+      if (lbl) { lbl.className = 'ps-status'; lbl.textContent = '—'; }
     });
   }
 
@@ -1198,18 +1947,18 @@
     e.preventDefault();
     const form   = e.target;
     const btn    = document.getElementById('run-btn');
-    const pCard  = document.getElementById('pipeline-card');
     const dot    = document.getElementById('dot');
     const status = document.getElementById('status-text');
     const dlBtn  = document.getElementById('download-btn');
 
-    btn.disabled        = true;
-    pCard.style.display = 'block';
-    dot.className       = 'dot running';
-    status.textContent  = 'Running…';
+    btn.disabled       = true;
+    dot.className      = 'dot running';
+    status.textContent = 'Running…';
     dlBtn.classList.remove('visible');
     resetSteps();
-    pCard.scrollIntoView({ behavior: 'smooth' });
+    setPipelineTab('ingestion');
+    document.getElementById('pipeline-progress-card').scrollIntoView({ behavior: 'smooth' });
+    setNavDot('ingestion', 'running');
 
     document.getElementById('log-panel-title').textContent = 'Live Logs';
     document.getElementById('log-toggle-btn').classList.add('running');
@@ -1235,13 +1984,16 @@
       const code = (m => m ? parseInt(m[1]) : null)(fullLog.match(/--- Exit (\d+) ---/));
       if (code === 0) {
         dot.className = 'dot ok'; status.textContent = 'Completed successfully';
+        setNavDot('ingestion', 'done'); setConnector('done');
       } else {
         dot.className = 'dot err'; status.textContent = `Failed (exit ${code ?? 'unknown'})`;
         STEPS.forEach(s => { if (stepStatus[s.id] === 'running') setStep(s.id, 'fail'); });
+        setNavDot('ingestion', 'fail');
       }
     } catch (err) {
       dot.className = 'dot err'; status.textContent = `Error: ${err.message}`;
       STEPS.forEach(s => { if (stepStatus[s.id] === 'running') setStep(s.id, 'fail'); });
+      setNavDot('ingestion', 'fail');
     } finally {
       btn.disabled = false;
       document.getElementById('log-toggle-btn').classList.remove('running');
@@ -1253,6 +2005,485 @@
       dlBtn.href = `/download-log?app_name=${encodeURIComponent(appName)}&ingest_date=${encodeURIComponent(ingestDate)}&log_folder=${encodeURIComponent(logFolder)}`;
       dlBtn.classList.add('visible');
       loadHistory(appName, logFolder);
+    }
+  });
+
+  // ── Bronze: sync fields from Step 1 / Step 2 ─────────────
+  const RUN_MODE_DESC = {
+    full:  'Reads lake data for run date, deduplicates, and overwrites the bronze partition.',
+    delta: 'Reads lake run-date batch and merges into the existing bronze table on primary keys.',
+  };
+
+  function syncBronzeFields() {
+    const appName = val('application_name');
+    const runDate = val('ingest_date');
+    const metaKey = val('metadata_key');
+
+    document.getElementById('bronze_app_name').value    = appName;
+    document.getElementById('bronze_run_date').value    = runDate;
+    document.getElementById('bronze_metadata_key').value = metaKey;
+
+    const ready = appName !== '' && runDate !== '';
+    const badge = document.getElementById('bronze-ready-badge');
+    badge.classList.toggle('valid',   ready);
+    badge.classList.toggle('invalid', !ready && (appName !== '' || runDate !== ''));
+    badge.querySelector('.badge-dot').style.background = ready ? 'var(--green)' : '';
+    badge.querySelector('.badge-label').textContent    = ready ? 'Ready' : 'Waiting';
+
+    document.getElementById('bronze-run-btn').disabled = !ready;
+
+    if (appName) loadBronzeHistory(appName);
+  }
+
+  document.getElementById('application_name').addEventListener('input',  syncBronzeFields);
+  document.getElementById('ingest_date').addEventListener('change',       syncBronzeFields);
+  document.getElementById('metadata_key').addEventListener('input',       syncBronzeFields);
+
+  document.querySelectorAll('input[name="run_type"]').forEach(r =>
+    r.addEventListener('change', () => {
+      document.getElementById('run-mode-desc').textContent = RUN_MODE_DESC[r.value] || '';
+    })
+  );
+
+  syncBronzeFields();
+
+  // ── Bronze pipeline step definitions ─────────────────────
+  const BRONZE_STEPS = [
+    { id: 'spark',    start: /Building SparkSession/,                        done: /SparkSession created/,                           fail: /SparkException|Failed to start Spark/i },
+    { id: 'metadata', start: /Reading metadata/,                             done: /Loaded metadata|Primary keys:/,                  fail: /Metadata.*missing|missing required columns/i },
+    { id: 'lake',     start: /=== Bronze (FULL|DELTA)/,              done: /Lake rows for run_date/,                                                        fail: /AnalysisException|table.*not found/i },
+    { id: 'snapshot', start: /Lake rows for run_date/,               done: /Reading previous bronze snapshot|Deduplicating|Writing bronze Iceberg|Bronze table does not exist|No previous snapshot/, fail: /ValueError.*primary_key/i },
+    { id: 'dedup',    start: /Reading previous bronze snapshot|Deduplicating/, done: /Writing bronze Iceberg|Merged snapshot rows|Bronze table does not exist/,  fail: /No primary_key columns/i },
+    { id: 'write',    start: /Writing bronze Iceberg/,               done: /Write complete/,                                                                    fail: /Write.*fail|IcebergException/i },
+    { id: 'complete', start: /Write complete/,                       done: /Bronze Pipeline Complete/,                                                          fail: /Failed to upload log|bronze pipeline failed/i },
+  ];
+
+  const bStepStatus = {};
+  BRONZE_STEPS.forEach(s => bStepStatus[s.id] = 'pending');
+
+  function setBStep(id, status) {
+    if (bStepStatus[id] === 'fail') return;
+    bStepStatus[id] = status;
+    const dot = document.querySelector(`#ps-bronze .ps-dot[data-bstep="${id}"]`);
+    const lbl = document.querySelector(`#ps-bronze .ps-status[data-bstep="${id}"]`);
+    if (dot) { dot.className = `ps-dot ${status}`; dot.setAttribute('data-bstep', id); }
+    if (lbl) { lbl.className = `ps-status ${status}`; lbl.textContent = _psLabel(status); }
+  }
+
+  function resetBSteps() {
+    BRONZE_STEPS.forEach(s => {
+      bStepStatus[s.id] = 'pending';
+      const dot = document.querySelector(`#ps-bronze .ps-dot[data-bstep="${s.id}"]`);
+      const lbl = document.querySelector(`#ps-bronze .ps-status[data-bstep="${s.id}"]`);
+      if (dot) { dot.className = 'ps-dot'; }
+      if (lbl) { lbl.className = 'ps-status'; lbl.textContent = '—'; }
+    });
+  }
+
+  function processBronzeLine(line) {
+    for (let i = 0; i < BRONZE_STEPS.length; i++) {
+      const s = BRONZE_STEPS[i];
+      if (s.fail && s.fail.test(line)) { setBStep(s.id, 'fail'); return; }
+      if (s.done && s.done.test(line)) {
+        for (let j = 0; j <= i; j++)
+          if (bStepStatus[BRONZE_STEPS[j].id] === 'pending' || bStepStatus[BRONZE_STEPS[j].id] === 'running')
+            setBStep(BRONZE_STEPS[j].id, 'done');
+        return;
+      }
+      if (s.start && s.start.test(line)) {
+        for (let j = 0; j < i; j++)
+          if (bStepStatus[BRONZE_STEPS[j].id] === 'pending' || bStepStatus[BRONZE_STEPS[j].id] === 'running')
+            setBStep(BRONZE_STEPS[j].id, 'done');
+        if (bStepStatus[s.id] === 'pending') setBStep(s.id, 'running');
+        return;
+      }
+    }
+  }
+
+  // ── Bronze run history ───────────────────────────────────
+  let _bronzeHistoryOpen = false;
+  function toggleBronzeHistory() {
+    _bronzeHistoryOpen = !_bronzeHistoryOpen;
+    document.getElementById('bronze-history-list').style.display = _bronzeHistoryOpen ? 'block' : 'none';
+    document.getElementById('bronze-history-toggle-btn').textContent = _bronzeHistoryOpen ? 'Hide' : 'Show';
+  }
+
+  async function loadBronzeHistory(appName) {
+    if (!appName) return;
+    const list = document.getElementById('bronze-history-list');
+    list.innerHTML = '<span class="history-empty">Loading…</span>';
+    try {
+      const r    = await fetch(`/log-history?app_name=${encodeURIComponent(appName)}&log_folder=bronze`);
+      const runs = await r.json();
+      if (!runs.length) { list.innerHTML = '<span class="history-empty">No previous bronze runs found.</span>'; return; }
+      list.innerHTML = runs.map(run => `
+        <div class="history-row">
+          <div>
+            <span class="history-label">${run.label}</span>
+            <span class="history-meta">${(run.size/1024).toFixed(1)} KB</span>
+          </div>
+          <button class="btn-view-log" onclick="viewHistoricalLog('${encodeURIComponent(run.key)}','${run.label}')">View</button>
+        </div>`).join('');
+    } catch { list.innerHTML = '<span class="history-empty">Could not load history.</span>'; }
+  }
+
+  // ── Scheduled Jobs ────────────────────────────────────
+  let _schedJobsMap = {}; // application_name -> job (populated by loadScheduledJobs)
+
+  function cronToHuman(expr) {
+    try {
+      const parts = expr.trim().split(/\s+/);
+      if (parts.length !== 5) return '';
+      const [min, hour, dom, month, dow] = parts;
+      const DOW = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
+      const MON = ['','January','February','March','April','May','June','July','August','September','October','November','December'];
+
+      function fmtTime(h, m) {
+        const hi = parseInt(h), mi = parseInt(m);
+        const ampm = hi < 12 ? 'AM' : 'PM';
+        const h12  = hi === 0 ? 12 : hi > 12 ? hi - 12 : hi;
+        return `${h12}:${String(mi).padStart(2,'0')} ${ampm}`;
+      }
+
+      let time = '';
+      if (min === '*' && hour === '*') {
+        time = 'every minute';
+      } else if (min.startsWith('*/') && hour === '*') {
+        time = `every ${min.slice(2)} minutes`;
+      } else if (hour.startsWith('*/') && min === '0') {
+        time = `every ${hour.slice(2)} hours`;
+      } else if (hour.startsWith('*/')) {
+        time = `every ${hour.slice(2)} hours at minute ${min}`;
+      } else if (hour === '*') {
+        time = `at minute ${min} of every hour`;
+      } else {
+        time = `at ${fmtTime(hour, min)}`;
+      }
+
+      let when = '';
+      if (dow !== '*' && dow !== '?') {
+        const days = dow.split(',').map(d => DOW[parseInt(d)] || d).join(', ');
+        when = ` on ${days}`;
+      } else if (dom !== '*' && dom !== '?') {
+        when = ` on day ${dom} of the month`;
+      } else {
+        when = ' every day';
+      }
+
+      if (month !== '*' && month !== '?') {
+        const months = month.split(',').map(m => MON[parseInt(m)] || m).join(', ');
+        when += ` in ${months}`;
+      }
+
+      return (time.charAt(0).toUpperCase() + time.slice(1) + when);
+    } catch { return ''; }
+  }
+
+  function _updateSchedBtnLabel() {
+    const btn     = document.getElementById('save-sched-btn');
+    if (!btn) return;
+    const appName = val('application_name');
+    const exists  = !!_schedJobsMap[appName];
+    btn.innerHTML = exists
+      ? '&#128197;&nbsp; Update Schedule'
+      : '&#128197;&nbsp; Save Schedule';
+  }
+
+  function toggleSchedSection(cb) {
+    const wrap = document.getElementById('sched-cron-wrap');
+    const btn  = document.getElementById('save-sched-btn');
+    wrap.style.display = cb.checked ? '' : 'none';
+    btn.style.display  = cb.checked ? '' : 'none';
+    if (cb.checked) {
+      const existing = _schedJobsMap[val('application_name')];
+      if (existing) {
+        document.getElementById('sched-cron').value = existing.cron_expression;
+      }
+      _updateSchedBtnLabel();
+    }
+    validateCronInput(document.getElementById('sched-cron'));
+  }
+
+  function validateCronInput(input) {
+    const btn      = document.getElementById('save-sched-btn');
+    const hint     = document.getElementById('sched-cron-human');
+    const cronVal  = input.value.trim();
+    const cronOk   = /^(\S+\s+){4}\S+$/.test(cronVal);
+    const runValid = !document.getElementById('run-btn').disabled;
+    if (btn) btn.disabled = !(runValid && cronOk);
+    if (hint) hint.textContent = cronOk ? cronToHuman(cronVal) : '';
+  }
+
+  async function saveSchedule() {
+    const cronVal = document.getElementById('sched-cron').value.trim();
+    if (!/^(\S+\s+){4}\S+$/.test(cronVal)) {
+      alert('Invalid cron expression. Format: min hour day month weekday (e.g. 0 2 * * *)');
+      return;
+    }
+    const sourceType = document.querySelector('input[name="source_type"]:checked')?.value || 's3';
+    const payload = {
+      application_name:  val('application_name'),
+      cron_expression:   cronVal,
+      source_type:       sourceType,
+      source_bucket:     val('source_bucket'),
+      source_key:        val('source_key'),
+      source_database:   val('source_database'),
+      source_table_name: val('source_table_name'),
+      metadata_key:      val('metadata_key'),
+      write_mode:        document.getElementById('write_mode').value,
+      log_level:         'INFO',
+    };
+    try {
+      const r = await fetch('/scheduled-jobs', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-CSRFToken': '{{ csrf_token() }}' },
+        body: JSON.stringify(payload),
+      });
+      if (!r.ok) throw new Error(await r.text());
+      document.getElementById('sched-enable').checked = false;
+      toggleSchedSection(document.getElementById('sched-enable'));
+      document.getElementById('sched-cron').value = '';
+      loadScheduledJobs();
+    } catch (err) {
+      alert('Failed to save schedule: ' + err.message);
+    }
+  }
+
+  async function loadScheduledJobs() {
+    try {
+      const r    = await fetch('/scheduled-jobs');
+      const jobs = await r.json();
+      // Rebuild lookup map
+      _schedJobsMap = {};
+      jobs.forEach(j => { _schedJobsMap[j.application_name] = j; });
+      _updateSchedBtnLabel();
+
+      const list = document.getElementById('sched-list');
+      if (!jobs.length) {
+        list.innerHTML = '<div class="sched-empty">No scheduled jobs.</div>';
+        return;
+      }
+      list.innerHTML = jobs.map(j => {
+        const lastRun   = j.last_run_at
+          ? `Last: ${j.last_run_at.slice(0,16).replace('T',' ')}`
+          : 'Never run';
+        const statusCls = j.last_run_status || '';
+        const human     = cronToHuman(j.cron_expression);
+        return `
+          <div class="sched-item" onclick="fillFormFromJob(${JSON.stringify(j).replace(/"/g,'&quot;')})">
+            <div class="sched-item-body">
+              <div class="sched-app">${j.application_name}</div>
+              <div class="sched-cron">${j.cron_expression}</div>
+              ${human ? `<div class="sched-human">${human}</div>` : ''}
+              <div class="sched-last ${statusCls}">${lastRun}${j.last_run_status ? ' · ' + j.last_run_status : ''}</div>
+            </div>
+            <button class="btn-sched-del" title="Remove schedule"
+                    onclick="event.stopPropagation(); deleteScheduledJob(${j.id})">✕</button>
+          </div>`;
+      }).join('');
+    } catch { /* silently ignore */ }
+  }
+
+  function fillFormFromJob(job) {
+    setLayer('ingestion');
+    document.getElementById('application_name').dispatchEvent(new Event('input'));
+
+    const set = (id, val) => { const el = document.getElementById(id); if (el) el.value = val || ''; };
+    set('application_name', job.application_name);
+    set('source_bucket',    job.source_bucket);
+    set('source_key',       job.source_key);
+    set('source_database',  job.source_database);
+    set('source_table_name', job.source_table_name);
+    set('metadata_key',     job.metadata_key);
+
+    const srcType = job.source_type || 's3';
+    const radio = document.querySelector(`input[name="source_type"][value="${srcType}"]`);
+    if (radio) { radio.checked = true; radio.dispatchEvent(new Event('change')); }
+
+    const wmSel = document.getElementById('write_mode_sel');
+    if (wmSel) { wmSel.value = job.write_mode || 'overwrite'; wmSel.dispatchEvent(new Event('change')); }
+
+    ['application_name','source_key','metadata_key'].forEach(id => {
+      document.getElementById(id)?.dispatchEvent(new Event('input'));
+    });
+    validateStages();
+    syncBronzeFields();
+
+    document.getElementById('step-card-1')?.scrollIntoView({ behavior: 'smooth' });
+  }
+
+  async function deleteScheduledJob(id) {
+    if (!confirm('Remove this scheduled job?')) return;
+    try {
+      await fetch(`/scheduled-jobs/${id}`, {
+        method: 'DELETE',
+        headers: { 'X-CSRFToken': '{{ csrf_token() }}' },
+      });
+      loadScheduledJobs();
+    } catch (err) {
+      alert('Failed to delete: ' + err.message);
+    }
+  }
+
+  // Load scheduled jobs on page load
+  loadScheduledJobs();
+
+  // ── Scheduled Jobs overlay page ──────────────────────────
+  let _sjSelectedJobId = null;
+
+  function openSchedPage() {
+    document.getElementById('sj-overlay').classList.add('open');
+    loadSchedPageJobs();
+  }
+
+  function closeSchedPage() {
+    document.getElementById('sj-overlay').classList.remove('open');
+  }
+
+  async function loadSchedPageJobs() {
+    const listEl = document.getElementById('sj-job-list');
+    listEl.innerHTML = '<div class="sj-empty-runs">Loading…</div>';
+    try {
+      const r    = await fetch('/scheduled-jobs');
+      const jobs = await r.json();
+      if (!jobs.length) {
+        listEl.innerHTML = '<div class="sj-empty-runs">No scheduled jobs yet.</div>';
+        return;
+      }
+      listEl.innerHTML = jobs.map(j => {
+        const human    = cronToHuman(j.cron_expression);
+        const badgeCls = j.last_run_status || 'pending';
+        const badgeTxt = j.last_run_status || 'Never run';
+        return `<div class="sj-job-item${_sjSelectedJobId === j.id ? ' selected' : ''}"
+                     id="sj-job-${j.id}"
+                     onclick="selectSchedJob(${j.id}, '${j.application_name.replace(/'/g,"\\'")}')" >
+          <div class="sj-job-name">${j.application_name}</div>
+          <div class="sj-job-cron">${j.cron_expression}</div>
+          ${human ? `<div class="sj-job-human">${human}</div>` : ''}
+          <span class="sj-job-badge ${badgeCls}">${badgeTxt}</span>
+        </div>`;
+      }).join('');
+      // Re-select the previously selected job if it's still in the list
+      if (_sjSelectedJobId) {
+        const stillHere = jobs.find(j => j.id === _sjSelectedJobId);
+        if (stillHere) selectSchedJob(_sjSelectedJobId, stillHere.application_name);
+      }
+    } catch { listEl.innerHTML = '<div class="sj-empty-runs">Failed to load jobs.</div>'; }
+  }
+
+  async function selectSchedJob(jobId, appName) {
+    _sjSelectedJobId = jobId;
+    // Highlight selected
+    document.querySelectorAll('.sj-job-item').forEach(el => el.classList.remove('selected'));
+    const item = document.getElementById(`sj-job-${jobId}`);
+    if (item) item.classList.add('selected');
+    // Update header
+    document.getElementById('sj-runs-title').textContent = `Run history — ${appName}`;
+    await loadSchedRuns(jobId);
+  }
+
+  async function loadSchedRuns(jobId) {
+    const runEl = document.getElementById('sj-run-list');
+    runEl.innerHTML = '<div class="sj-empty-runs">Loading…</div>';
+    try {
+      const r    = await fetch(`/scheduled-job-runs?job_id=${jobId}`);
+      const runs = await r.json();
+      if (!runs.length) {
+        runEl.innerHTML = '<div class="sj-empty-runs">No runs recorded yet for this job.</div>';
+        return;
+      }
+      runEl.innerHTML = runs.map(run => {
+        const started  = run.started_at  ? run.started_at.slice(0,19).replace('T',' ')  : '—';
+        const finished = run.finished_at ? run.finished_at.slice(0,19).replace('T',' ') : '—';
+        const status   = run.status || 'running';
+        const logs     = run.logs  || '(no logs captured)';
+        return `
+          <div class="sj-run-item">
+            <div class="sj-run-summary" onclick="toggleRunLogs(${run.id})">
+              <span class="sj-run-badge ${status}">${status}</span>
+              <span class="sj-run-date">${run.run_date}</span>
+              <span class="sj-run-time">${started}</span>
+              <span class="sj-run-chevron" id="sj-chev-${run.id}">▶</span>
+            </div>
+            <pre class="sj-run-logs" id="sj-logs-${run.id}">${logs.replace(/</g,'&lt;')}</pre>
+          </div>`;
+      }).join('');
+    } catch { runEl.innerHTML = '<div class="sj-empty-runs">Failed to load run history.</div>'; }
+  }
+
+  function toggleRunLogs(runId) {
+    const logsEl = document.getElementById(`sj-logs-${runId}`);
+    const chevEl = document.getElementById(`sj-chev-${runId}`);
+    const open   = logsEl.classList.toggle('open');
+    chevEl.classList.toggle('open', open);
+  }
+
+  function refreshSchedRuns() {
+    if (_sjSelectedJobId) loadSchedRuns(_sjSelectedJobId);
+    else loadSchedPageJobs();
+  }
+
+  // ── Bronze form submit ───────────────────────────────────
+  document.getElementById('bronze-form').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const form   = e.target;
+    const btn    = document.getElementById('bronze-run-btn');
+    const dot    = document.getElementById('bronze-dot');
+    const status = document.getElementById('bronze-status-text');
+    const dlBtn  = document.getElementById('bronze-download-btn');
+
+    btn.disabled       = true;
+    dot.className      = 'dot running';
+    status.textContent = 'Running…';
+    dlBtn.classList.remove('visible');
+    resetBSteps();
+    setPipelineTab('bronze');
+    document.getElementById('pipeline-progress-card').scrollIntoView({ behavior: 'smooth' });
+    setNavDot('bronze', 'running');
+
+    document.getElementById('log-panel-title').textContent = 'Bronze Logs';
+    document.getElementById('log-toggle-btn').classList.add('running');
+    clearLog('Starting bronze pipeline…');
+    _autoScroll = true;
+
+    let fullLog = '';
+    try {
+      const res    = await fetch('/run-bronze', { method: 'POST', body: new FormData(form) });
+      const reader = res.body.getReader();
+      const dec    = new TextDecoder();
+      let   buffer = '';
+      while (true) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        buffer += dec.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop();
+        for (const line of lines) { fullLog += line + '\n'; processBronzeLine(line); appendLog(line); }
+      }
+      if (buffer) { fullLog += buffer; processBronzeLine(buffer); appendLog(buffer); }
+
+      const code = (m => m ? parseInt(m[1]) : null)(fullLog.match(/--- Exit (\d+) ---/));
+      if (code === 0) {
+        dot.className = 'dot ok'; status.textContent = 'Bronze completed successfully';
+        setNavDot('bronze', 'done');
+      } else {
+        dot.className = 'dot err'; status.textContent = `Failed (exit ${code ?? 'unknown'})`;
+        BRONZE_STEPS.forEach(s => { if (bStepStatus[s.id] === 'running') setBStep(s.id, 'fail'); });
+        setNavDot('bronze', 'fail');
+      }
+    } catch (err) {
+      dot.className = 'dot err'; status.textContent = `Error: ${err.message}`;
+      BRONZE_STEPS.forEach(s => { if (bStepStatus[s.id] === 'running') setBStep(s.id, 'fail'); });
+      setNavDot('bronze', 'fail');
+    } finally {
+      btn.disabled = false;
+      document.getElementById('log-toggle-btn').classList.remove('running');
+
+      const appName = document.getElementById('bronze_app_name').value;
+      const runDate = document.getElementById('bronze_run_date').value;
+      dlBtn.href = `/download-log?app_name=${encodeURIComponent(appName)}&ingest_date=${encodeURIComponent(runDate)}&log_folder=bronze`;
+      dlBtn.classList.add('visible');
+      loadBronzeHistory(appName);
     }
   });
 </script>

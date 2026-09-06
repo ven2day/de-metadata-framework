@@ -3,7 +3,8 @@ from argparse import Namespace
 from ast import literal_eval
 
 from pyspark.sql import DataFrame, SparkSession
-from pyspark.sql.functions import months, to_date, lit, year, month, days
+from pyspark.sql.functions import months, to_date, lit, year, month
+from pyspark.sql.functions import partitioning
 
 from ingestion.env.DE_Ingestion_properties import ICEBERG_CATALOG, ICEBERG_DATABASE, ICEBERG_DATA_BUCKET, ICEBERG_METADATA_BUCKET
 from ingestion.pyfiles.logger import get_logger
@@ -50,7 +51,7 @@ def write_to_minio(
         .using("iceberg")
         .tableProperty("write.data.path", data_path)
         .tableProperty("write.meta.path", meta_location)
-        .partitionedBy(*d.keys(), days("ingest_date"))
+        .partitionedBy(*d.keys(), partitioning.days("ingest_date"))
     )
     if mode.strip() == "append":
         writer.append()

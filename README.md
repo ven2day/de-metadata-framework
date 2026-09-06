@@ -8,52 +8,93 @@ A metadata-driven data ingestion pipeline built on Apache Spark and Apache Icebe
 
 ### High-Level Architecture
 
-Data flows from external sources through the pipeline into an Iceberg data lake. The web UI is gated behind authentication; consumers query tables directly.
+Data flows from external sources through the pipeline into a Medallion Iceberg data lake (Lake → Bronze). The web UI is gated behind authentication; consumers query tables directly.
 
 ```
-                    ┌──────────────────────────────────────────────┐
-  Data Sources      │            DE Metadata Framework             │      Consumers
-                    │                                              │
-  ┌──────────┐      │  ┌────────┐    ┌──────────────────────────┐ │
-  │ S3 / MinIO├─────┼─▶│        │    │   Apache Iceberg          │ │  ┌──────────────┐
-  │ (raw data)│     │  │        │───▶│   Tables (MinIO)          ├─┼─▶│ BI / Spark   │
-  └──────────┘      │  │        │    │ de-iceberg-warehouse-bucket/ │ │  │ query engine │
-                    │  │  Spark │    └──────────────────────────┘ │  └──────────────┘
-  ┌──────────┐      │  │  ETL   │                                  │
-  │ Supabase /├─────┼─▶│  Pipeline   ┌──────────────────────────┐ │
-  │ PostgreSQL│     │  │        │───▶│   Pipeline Logs           │ │  ┌──────────────┐
-  └──────────┘      │  │        │    │   (MinIO log bucket)      ├─┼─▶│ Operators /  │
-                    │  └────┬───┘    └──────────────────────────┘ │  │ Monitoring   │
-  ┌──────────┐      │       │                                      │  └──────────────┘
-  │ Metadata  ├─────┼───────┘        ┌──────────────────────────┐ │
-  │ Sheet CSV │     │                │   Email Notification      │ │  ┌──────────────┐
-  │ (MinIO)   │     │                │   (Brevo API)             ├─┼─▶│ Data Engineer│
-  └──────────┘      │                └──────────────────────────┘ │  └──────────────┘
-                    │                                              │
-  ┌──────────┐      │  ┌──────────────────────────────────────┐   │
-  │ Engineer  ├─────┼─▶│  Flask Web UI (login-protected)       │   │
-  │ (browser) │     │  │  Submit jobs · Stream logs · Download │   │
-  └──────────┘      │  │  Root user manages team access        │   │
-                    │  └──────────────────────────────────────┘   │
-                    └──────────────────────────────────────────────┘
-                                        ▲
-                          Cloudflare Tunnel (cloudflared)
-                          app / minio / s3 / vault subdomains
+                        ┌───────────────────────────────────────────────────────────────────────────────────────────┐
+  Raw Data Sources      │                              DE Metadata Framework                                        │   Consumers
+                        │                                                                                           │
+  ┌──────────────────┐  │  ┌─────────────────────────────────────────────────────────────────────────────────────┐  │
+  │  S3 Bucket       │  │  │  STEP 1 — INGESTION                                                                 │  │
+  │  · .csv          ├──┼─▶│                                                                                     │  │
+  │  · .json         │  │  │  ┌─────────────────────────────────────────────────────────────────────────────┐    │  │
+  │  · .parquet      │  │  │  │  Spark ETL Pipeline                                                         │    │  │
+  └──────────────────┘  │  │  │  1. Read source data (S3 multi-format or Supabase/PostgreSQL JDBC)          │    │  │
+                        │  │  │  2. Apply Metadata Sheet: aliasing · type casting · PII hash/mask/encrypt   │    │  │
+  ┌──────────────────┐  │  │  └─────────────────────────────────────────────────────────────────────────────┘    │  │
+  │  Supabase /      ├──┼─▶│                                    │                                                │  │
+  │  PostgreSQL      │  │  │                                    ▼                                                │  │
+  └──────────────────┘  │  │  ┌─────────────────────────────────────────────────────────────────────────────┐    │  │
+                        │  │  │  Iceberg Table — LAKE LAYER  (minio.de_lake.<app>)                          │    │  │
+  ┌──────────────────┐  │  │  │  data → s3a://de-data-lake/<app>/                                           ├─── ┼──┼──▶ BI / Spark
+  │  Metadata Sheet  ├──┼─▶┼  │  meta → s3a://de-iceberg-warehouse-bucket/de_lake/<app>/                    │    │  │    query engine
+  │  CSV             │  │  │  │  partition: days(ingest_date)                                               │    │  │
+  │  (de-metadata-   │  │  │  └─────────────────────────────────────────────────────────────────────────────┘    │  │
+  │   bucket)        │  │  └─────────────────────────────────────────────────────────────────────────────────────┘  │
+  │                  │  │                            │                                                              │
+  │  (shared by      │  │              ┌─────────────┘  ingestion must complete before bronze runs                  │ 
+  │  ingestion and   │  │              ▼                                                                            │
+  │  bronze)         │  │  ┌─────────────────────────────────────────────────────────────────────────────────────┐  │
+  └──────┬───────────┘  │  │  STEP 2 — BRONZE  (reads Metadata Sheet for primary_key + is_timestamp columns)     │  │
+         │              │  │                                                                                     │  │
+         └─────────────▶┼──┤  ┌──────────────────────────────┐  ┌──────────────────────────────────────────┐     │  │
+                        │  │  │  FULL LOAD                   │  │  DELTA                                   │     │  │
+                        │  │  │  ──────────────────────────  │  │  ──────────────────────────────────────  │     │  │
+                        │  │  │  1. Read lake table filtered │  │  1. Read lake[ingest_date = run_date]    │     │  │
+                        │  │  │     by ingest_date=run_date  │  │  2. Read bronze[snapshot_date<run_date]  │     │  │
+                        │  │  │  2. Dedup by primary_key +   │  │  3. Dedup lake by primary_key +          │     │  │
+                        │  │  │     timestamp/date col       │  │     timestamp/date col                   │     │  │
+                        │  │  │     → keep latest per key    │  │  4. Union new (wins) + prev snapshot     │     │  │
+                        │  │  │  3. snapshot_date = run_date │  │  5. snapshot_date = run_date             │     │  │
+                        │  │  └──────────────────────────────┘  └──────────────────────────────────────────┘     │  │
+                        │  │                                    │                                                │  │
+                        │  │                                    ▼                                                │  │
+                        │  │  ┌─────────────────────────────────────────────────────────────────────────────┐    │  │
+                        │  │  │  Iceberg Table — BRONZE LAYER  (minio.de_bronze.<app>)                      │    │  │
+                        │  │  │  data → s3a://de-data-bronze/<app>/                                         ├─── ┼──┼──▶ BI / Spark
+                        │  │  │  meta → s3a://de-iceberg-warehouse-bucket/de_bronze/<app>/                  │    │  │    query engine
+                        │  │  │  partition: days(snapshot_date)                                             │    │  │
+                        │  │  └─────────────────────────────────────────────────────────────────────────────┘    │  │
+                        │  └─────────────────────────────────────────────────────────────────────────────────────┘  │
+                        │                                                                                           │
+                        │  ┌─────────────────────────────────────────────────────────────────────────────────────┐  │
+  ┌──────────────────┐  │  │  Flask Web UI (login-protected)                                                     │  │
+  │  Engineer        ├──┼─▶│  Submit ingestion and bronze jobs · Stream logs · Manage users · Schedule jobs      │  │
+  │  (browser)       │  │  └─────────────────────────────────────────────────────────────────────────────────────┘  │
+  └──────────────────┘  └───────────────────────────────────────────────────────────────────────────────────────────┘
+                                                        ▲
+                                          Cloudflare Tunnel (cloudflared)
+                                          app / minio / s3 / vault subdomains
 ```
 
-**Data flow summary:**
+**Data flow summary (Medallion Architecture):**
+
+**Step 1 — Ingestion** (`--run-type` not applicable — always a full source read)
 
 | Step | What happens |
 |---|---|
-| 1. Login | Engineer authenticates via the login page (Argon2id passwords, account lockout) |
-| 2. Submit | Fills in the UI form (source, metadata key, output settings) |
-| 3. Spawn | UI launches a fresh pipeline container via Docker socket |
-| 4. Read metadata | Pipeline fetches the CSV schema sheet from MinIO |
-| 5. Read source | Pipeline reads raw data from S3 or Supabase/PostgreSQL |
-| 6. Transform | Schema validation → type casting → PII processing (hash / mask / encrypt) |
-| 7. Write | Iceberg table written/appended to MinIO warehouse |
-| 8. Log | Full run log uploaded to MinIO log bucket |
-| 9. Notify | Success/failure email sent via Brevo |
+| 1 | Engineer submits a job via the Web UI or CLI |
+| 2 | UI spawns a fresh pipeline container via Docker socket |
+| 3 | Reads **Metadata Sheet CSV** from `de-metadata-bucket` — defines columns, types, aliases, and PII actions |
+| 4 | Reads raw source data — **S3** (`.csv` / `.json` / `.parquet`) or **Supabase / PostgreSQL** via JDBC |
+| 5 | Applies schema: column aliasing, type casting, PII processing (hash / mask / encrypt) |
+| 6 | Writes **Iceberg table** `minio.de_lake.<app>` — data path `s3a://de-data-lake/<app>/`, meta path `s3a://de-iceberg-warehouse-bucket/de_lake/<app>/`, partitioned by `days(ingest_date)` |
+| 7 | Uploads run log → `s3a://de-data-migration-logs/lake/<app>/<date>/` |
+| 8 | Sends success / failure email via Brevo |
+
+**Step 2 — Bronze** (`--run-type full` or `--run-type delta` — runs after ingestion completes)
+
+Both modes read the **same Metadata Sheet CSV** to identify `primary_key` and `is_timestamp` columns.
+
+| Step | Full Load | Delta |
+|---|---|---|
+| 1 | Read `minio.de_lake.<app>` filtered by `ingest_date = run_date` | Read `minio.de_lake.<app>` filtered by `ingest_date = run_date` |
+| 2 | Dedup by primary key + timestamp/date column → keep the latest record per key | Also read existing `minio.de_bronze.<app>` where `snapshot_date < run_date` |
+| 3 | Set `snapshot_date = run_date` on all result rows | Dedup the lake batch by primary key + timestamp/date column |
+| 4 | Write result to Bronze Iceberg table | Union new batch (`_priority=0`) with prev snapshot (`_priority=1`); dedup by primary_key — new wins on conflict |
+| 5 | — | Write result as new partition `snapshot_date = run_date` |
+| 6 | Writes **Iceberg table** `minio.de_bronze.<app>` — data path `s3a://de-data-bronze/<app>/`, meta path `s3a://de-iceberg-warehouse-bucket/de_bronze/<app>/`, partitioned by `days(snapshot_date)` | ← same for both modes |
+| 7 | Uploads run log → `s3a://de-data-migration-logs/bronze/<app>/<date>/` | ← same for both modes |
 
 ---
 
@@ -70,43 +111,45 @@ Data flows from external sources through the pipeline into an Iceberg data lake.
 | **pipeline** | Spark ETL runner — spawned on-demand, auto-removed | — | — |
 | **minio-init** | One-shot bucket provisioner (runs once on first up) | — | — |
 | **vault-init** | One-shot Vault bootstrapper — unseals + seeds secrets | — | — |
+| **awscli** | Debug helper — AWS CLI pre-wired to MinIO endpoint | — | — |
 
 #### Docker Network Topology
 
 ```
-┌──────────────────────────────────────────────────────────────────────────┐
-│  Docker Host                                                             │
-│                                                                          │
-│  ┌───────────────────────── de-net (bridge) ──────────────────────────┐  │
-│  │                                                                    │  │
-│  │  ┌─────────────┐   ┌────────────┐   ┌────────────┐  ┌──────────┐  │  │
-│  │  │    minio    │   │   vault    │   │    de-ui   │  │cloudflared│  │  │
-│  │  │ :9000 API   │   │  :8200     │   │  :5000     │  │ (tunnel) │  │  │
-│  │  │ :9001 console   │ Transit    │   │  Flask app │  │ outbound │  │  │
-│  │  │             │   │ KV v2      │   │  Auth/CSRF │  │ HTTP/2   │  │  │
-│  │  └──────┬──────┘   └─────┬──────┘   └─────┬──────┘  └────┬─────┘  │  │
-│  │         │                │                 │              │        │  │
-│  │         │         vault_secrets volume      │     ┌────────┘        │  │
-│  │         │         (pipeline_token,          │     │ routes:         │  │
-│  │         │          supabase_pwd_ciphertext)  │     │ app.→ de-ui     │  │
-│  │         │                │                 │     │ s3.→  minio:9000│  │
-│  │         │                ▼                 │     │ minio.→:9001    │  │
-│  │         │    ┌───────────────────────┐     │     │ vault.→vault    │  │
-│  │         └───▶│  pipeline (ephemeral) │◀────┘     └─────────────────│  │
-│  │               │  spawned via Docker  │                              │  │
-│  │               │  sock; Spark 4.x     │                              │  │
-│  │               │  local[*], auto-rm   │                              │  │
-│  │               └───────────────────────┘                              │  │
-│  └────────────────────────────────────────────────────────────────────┘  │
-│                                                                          │
-│  /var/run/docker.sock  (de-ui mounts host socket to spawn pipeline)      │
-└──────────────────────────────────────────────────────────────────────────┘
+┌────────────────────────────────────────────────────────────────────────────────┐
+│  Docker Host                                                                   │
+│                                                                                │
+│  ┌──────────────────────────── de-net (bridge) ──────────────────────────────┐ │
+│  │                                                                           │ │
+│  │  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐       │ │
+│  │  │    minio    │  │    vault    │  │    de-ui    │  │ cloudflared │       │ │
+│  │  │  :9000 API  │  │    :8200    │  │    :5000    │  │  (tunnel)   │       │ │
+│  │  │:9001 console│  │   Transit   │  │  Flask app  │  │  outbound   │       │ │
+│  │  │             │  │   KV v2     │  │  Auth/CSRF  │  │  HTTP/2     │       │ │
+│  │  └──────┬──────┘  └──────┬──────┘  └──────┬──────┘  └──────┬──────┘       │ │
+│  │         │                │                │                │              │ │
+│  │         │                │                 │               │              │ │
+│  │         │      vault_secrets volume        │     ┌──────┘─────────────┐   │ │         
+│  │         │      (pipeline_token,            │     │ routes:            │   │ │
+│  │         │       supabase_pwd_ciphertext)   │     │ app.   → de-ui     │   │ │
+│  │         │                │                 │     │ s3.    → minio:9000│   │ │
+│  │         │                ▼                 │     │ minio. → :9001     │   │ │
+│  │         │    ┌───────────────────────┐     │     │ vault. → vault     │   │ │
+│  │         └───▶│  pipeline (ephemeral) │◀────┘     └────────────────────┘   │ │
+│  │              │  spawned via Docker   │                                    │ │
+│  │              │  sock; Spark 4.x      │                                    │ │
+│  │              │  local[*], auto-rm    │                                    │ │
+│  │              └───────────────────────┘                                    │ │
+│  └───────────────────────────────────────────────────────────────────────────┘ │
+│                                                                                │
+│  /var/run/docker.sock  (de-ui mounts host socket to spawn pipeline)            │
+└────────────────────────────────────────────────────────────────────────────────┘
                                     │
                    Cloudflare Tunnel (HTTPS, HTTP/2)
                                     │
                     ┌───────────────┴───────────────┐
                     │      atestingdomain.info       │
-                    │  app.*   minio.*  s3.*  vault.*│
+                    │  app.*  minio.*  s3.*  vault.* │
                     └───────────────────────────────┘
 ```
 
@@ -175,7 +218,7 @@ Data flows from external sources through the pipeline into an Iceberg data lake.
   └── vault_client.py  ──▶  Vault Transit decrypt  ──▶  Supabase plaintext password
 ```
 
-#### Spark Execution Flow
+#### Spark Execution Flow — Lake Pipeline
 
 ```
   pipeline.py (spark-submit entry point)
@@ -183,52 +226,117 @@ Data flows from external sources through the pipeline into an Iceberg data lake.
   ├── 1. Parse CLI args (argparse)
   ├── 2. Load env config  (DE_Ingestion_properties.py)
   ├── 3. Build SparkSession  (spark_session.py)
-  │       └── Config loaded from conf/spark-defaults.conf (SPARK_CONF_DIR)
-  │           ├── Iceberg extensions
-  │           ├── S3A credentials + endpoint
-  │           └── Iceberg catalog (minio / hadoop type)
+  │       └── Config from conf/spark-defaults.conf
+  │           ├── Iceberg extensions + hadoop catalog
+  │           ├── S3A credentials + endpoint (injected by entrypoint.sh)
+  │           └── Iceberg catalog: minio → s3a://de-iceberg-warehouse-bucket/
   │
-  ├── 4. Read metadata sheet CSV from MinIO
-  │       └── Columns: column_name, data_type, nullable, pii_action, description
+  ├── 4. Read metadata sheet CSV  (metadata_reader.py)
+  │       └── s3a://de-metadata-bucket/<key>
   │
   ├── 5. Read source data
-  │       ├── S3 path  → SparkReader.parquet / csv / json (s3a://)
-  │       └── Database → SparkReader.jdbc (Supabase / PostgreSQL)
+  │       ├── S3 path  → SparkReader.parquet / csv / json  (s3a://)
+  │       └── Database → SparkReader.jdbc  (Supabase / PostgreSQL)
   │
-  ├── 6. Schema validation
-  │       └── Assert all metadata columns present in source DataFrame
-  │
-  ├── 7. Type casting
-  │       └── Cast each column to target data_type from metadata sheet
-  │
-  ├── 8. PII processing  (pii_processor.py + vault_client.py)
+  ├── 6. Schema validation → 7. Type casting → 8. PII processing
   │       ├── hash    → HMAC-SHA256 with SALT_KEY
   │       ├── mask    → replace with "****"
   │       └── encrypt → AES-256-GCM with key from Vault Transit export
   │
-  ├── 9. Write Iceberg table
-  │       └── spark.sql / DataFrameWriter  →  minio.<database>.<table>
-  │           Modes: overwrite | append | replace
+  ├── 9. Write Iceberg table  (minio_writer.py)
+  │       ├── Table:     minio.de_lake.<app_name>
+  │       ├── Data path: s3a://de-data-lake/<app_name>/                       (write.data.path)
+  │       ├── Meta path: s3a://de-iceberg-warehouse-bucket/de_lake/<app_name>/  (write.meta.path)
+  │       ├── Partition: days(ingest_date)
+  │       └── Modes: overwrite | append | replace
   │
-  ├── 10. Upload log file to MinIO  (logger.py)
-  └── 11. Send email notification   (notifier.py → Brevo API)
+  ├── 10. Upload log  → s3a://de-data-migration-logs/lake/<app>/<date>/
+  └── 11. Email notification via Brevo
+```
+
+#### Spark Execution Flow — Bronze Pipeline
+
+```
+  bronze_pipeline.py (spark-submit entry point)
+  │
+  ├── 1. Parse CLI args (--application-name, --run-date, --run-type)
+  ├── 2. Build SparkSession  (same spark-defaults.conf)
+  ├── 3. Read metadata sheet → extract primary_key and is_timestamp columns
+  │
+  ├── 4. run_full OR run_delta  (bronze_processor.py)
+  │
+  │   run_full (--run-type full)
+  │   ├── Read:  minio.de_lake.<app> WHERE ingest_date = run_date
+  │   ├── Dedup: Window(partitionBy=primary_keys, orderBy=timestamp desc) → row_number=1
+  │   │          (or dropDuplicates if no timestamp column)
+  │   ├── Add:   snapshot_date = run_date
+  │   └── Write: createOrReplace (first run) or overwritePartitions (subsequent)
+  │
+  │   run_delta (--run-type delta)
+  │   ├── Read:  minio.de_lake.<app> WHERE ingest_date = run_date  → dedup
+  │   ├── If bronze table is new → fall back to full write
+  │   └── Else →
+  │       ├── Read bronze WHERE snapshot_date = MAX(snapshot_date < run_date)
+  │       ├── Union: df_new(_priority=0) + df_prev(_priority=1)
+  │       ├── Window.partitionBy(*PKs).orderBy(_priority) → keep row_number=1
+  │       └── Write new partition: snapshot_date = run_date
+  │
+  └── 5. Write Iceberg table  (_write_bronze)
+          ├── Table:     minio.de_bronze.<app_name>
+          ├── Data path: s3a://de-data-bronze/<app_name>/                         (write.data.path)
+          ├── Meta path: s3a://de-iceberg-warehouse-bucket/de_bronze/<app_name>/ (write.meta.path)
+          └── Partition: days(snapshot_date)
 ```
 
 #### MinIO Bucket Layout
 
 ```
   MinIO
-  ├── de-source-data-bucket/          ← raw input files (S3 source)
+  │
+  ├── de-source-data-bucket/              ← raw input files (S3 source type)
   │   └── <folder>/<file>
-  ├── de-metadata-bucket/             ← metadata CSV sheets
-  │   └── <dataset>_schema.csv
-  ├── de-data-lake/                   ← Iceberg Parquet data files
-  │   └── <application_name>/
-  ├── de-iceberg-warehouse-bucket/    ← Iceberg metadata (manifests + snapshots)
-  │   └── <application_name>/
-  └── de-data-migration-logs/         ← per-run pipeline logs
-      └── lake/<app-name>/<date>/<app-name>_<date>_<ts>.log
+  │
+  ├── de-metadata-bucket/                 ← metadata CSV sheets
+  │   └── <dataset>_metadata.csv
+  │
+  ├── de-data-lake/                       ← LAKE LAYER: Iceberg Parquet data files
+  │   └── <app_name>/                     │  (write.data.path)
+  │       └── data/                       │
+  │           └── ingest_date=YYYY-MM-DD/ │  daily partitions
+  │               └── *.parquet           │
+  │
+  ├── de-data-bronze/                     ← BRONZE LAYER: deduplicated Parquet data
+  │   └── <app_name>/                     │  (write.data.path)
+  │       └── data/                       │
+  │           └── snapshot_date_day=*/    │  daily partitions
+  │               └── *.parquet           │
+  │
+  ├── de-iceberg-warehouse-bucket/        ← Iceberg metadata (manifests + snapshots)
+  │   ├── de_lake/                        │  Lake meta (write.meta.path)
+  │   │   └── <app_name>/
+  │   │       └── metadata/               │  *.avro, *.json, snap-*.avro
+  │   └── de_bronze/                      │  Bronze meta (write.meta.path)
+  │       └── <app_name>/
+  │           └── metadata/               │  *.avro, *.json, snap-*.avro
+  │
+  └── de-data-migration-logs/             ← pipeline run logs
+      ├── lake/<app>/<date>/<app>_<date>_<spark-id>.log
+      └── bronze/<app>/<date>/bronze_<app>_<date>_<spark-id>.log
 ```
+
+#### Iceberg Data Path vs Meta Path
+
+Iceberg splits each table into two storage locations, set via `DataFrameWriter.tableProperty`:
+
+| Property | Purpose | Lake value | Bronze value |
+|---|---|---|---|
+| `write.data.path` | Parquet data files | `s3a://de-data-lake/<app>/` | `s3a://de-data-bronze/<app>/` |
+| `write.meta.path` | Metadata files (manifests, snapshots, schema) | `s3a://de-iceberg-warehouse-bucket/de_lake/<app>/` | `s3a://de-iceberg-warehouse-bucket/de_bronze/<app>/` |
+
+Keeping data and metadata in separate buckets means:
+- **Data bucket** can be lifecycle-managed or swapped independently of the catalog metadata
+- **Warehouse bucket** holds only lightweight JSON/Avro metadata — easy to back up and inspect
+- Both lake and bronze metadata coexist in `de-iceberg-warehouse-bucket` under different prefixes, so a single Iceberg catalog (`minio`) covers all layers
 
 ---
 
@@ -291,7 +399,8 @@ de-metadata-framework/
 │   ├── ui-entrypoint.sh              # UI container entry point (seeds root user)
 │   ├── vault_init.py                 # One-shot Vault bootstrap
 │   ├── seed_root_user.py             # Creates root user on first UI start
-│   └── pip_install.sh                # Smart pip installer (skips cached versions)
+│   ├── pip_install.sh                # Smart pip installer (skips cached versions)
+│   └── awscli-entrypoint.sh          # AWS CLI entrypoint pre-wired to MinIO credentials
 ├── conf/
 │   ├── spark-defaults.conf           # Spark + Iceberg + S3A config (gitignored)
 │   └── log4j2.properties             # Spark logging config
@@ -306,6 +415,9 @@ de-metadata-framework/
 │   │   └── notifier.py               # Brevo email notifications
 │   ├── source/                       # S3 and Supabase/JDBC readers
 │   └── sink/                         # Iceberg/MinIO writer
+├── bronze_layer/
+│   ├── bronze_pipeline.py            # Bronze spark-submit entry point
+│   └── bronze_processor.py           # Dedup logic: extract_bronze_keys, run_full, run_delta
 ├── ui/
 │   ├── app.py                        # Flask application + pipeline routes
 │   ├── auth.py                       # Login / logout / user management routes
@@ -547,6 +659,105 @@ docker compose run --rm pipeline \
   --write-mode append
 ```
 
+### S3 Source Key Date Resolution
+
+The `--source-key` argument supports automatic date resolution using `__` as a mandatory separator between the static prefix and the date component:
+
+- **Exact match** — key is used as-is if the object exists
+- **Token substitution** — if the key contains `__<TOKEN>` (e.g. `file__YYYY-MM-DD.csv`), the token is replaced with `ingest_date` in the matching format
+- **Prefix listing** — if the key contains `__` but no known token, S3 objects are listed under the prefix before `__` and matched by date
+- **No `__` separator** — if the key has no `__` and the exact object doesn't exist, the job fails immediately (no date substitution is attempted)
+
+Supported tokens (all require `__` prefix in the key): `YYYY-MM-DD`, `DD-MM-YYYY`, `MM-DD-YYYY`, `YYYY_MM_DD`, `DD_MM_YYYY`, `MM_DD_YYYY`, `YYYYMMDD`, `DDMMYYYY`
+
+Example:
+```
+source_key = data/sales__YYYY-MM-DD.csv   → resolves to data/sales__2026-01-15.csv
+source_key = data/sales__20260115.csv     → used as-is (exact match)
+source_key = data/sales.csv               → used as-is or fails if not found
+```
+
+### Running the Bronze Pipeline
+
+The bronze layer reads from `minio.de_lake.<app>`, deduplicates using primary keys from the metadata sheet, and writes to `minio.de_bronze.<app>` (partitioned by `days(snapshot_date)`).
+
+**Full run** (processes a single `ingest_date` partition from the lake):
+
+```bash
+docker compose run --rm pipeline bronze \
+  --application-name my_dataset \
+  --run-date 2026-01-15 \
+  --run-type full \
+  --metadata-key metadata/my_dataset_schema.csv \
+  --log-level INFO
+```
+
+**Delta run** (merges lake data with the previous bronze snapshot (union + priority dedup)):
+
+```bash
+docker compose run --rm pipeline bronze \
+  --application-name my_dataset \
+  --run-date 2026-01-15 \
+  --run-type delta \
+  --metadata-key metadata/my_dataset_schema.csv
+```
+
+> **Typical workflow:** run ingestion first to land data in the lake, then run bronze to produce the deduplicated snapshot.
+
+### Interactive Spark Shell (Debugging)
+
+To open an interactive shell inside the pipeline container with Spark credentials already injected:
+
+```bash
+docker compose run --rm -it pipeline shell
+```
+
+This runs the entrypoint seds (substituting MinIO credentials into `spark-defaults.conf`) before dropping into `/bin/sh`. From there you can run `spark-sql` or `pyspark` and query Iceberg tables:
+
+```sql
+-- inside spark-sql
+SHOW TABLES IN minio.de_lake;
+SHOW TABLES IN minio.de_bronze;
+SELECT * FROM minio.de_lake.my_dataset LIMIT 10;
+```
+
+> **Never use** `--entrypoint /bin/sh` directly — that bypasses the entrypoint and leaves `MINIO_ACCESS_KEY_PLACEHOLDER` unreplaced in the Spark config, causing 403 errors.
+
+---
+
+## Scheduled Jobs
+
+The UI supports APScheduler-backed scheduled pipeline jobs stored in PostgreSQL.
+
+**Database tables:**
+- `public.scheduled_jobs` — stores all active schedules (application_name is unique — saving again updates the existing schedule)
+- `public.scheduled_job_runs` — stores run history including full container stdout/stderr logs per execution
+
+**Scheduling a job:**
+1. Fill in the pipeline form as normal
+2. Check "Schedule this job" — if the application_name already has a saved schedule, the cron expression is pre-filled and the button shows "Update Schedule"
+3. Enter a cron expression (5-part: `min hour day month weekday`). A human-readable description is shown live (e.g. `0 2 * * 1` → "At 02:00 AM on Monday")
+4. Click "Save Schedule" / "Update Schedule"
+
+**Scheduled Jobs page:**
+Click "📅 Scheduled Jobs" in the top navbar to open a full-page overlay with:
+- **Left panel** — all active scheduled jobs with name, cron expression, human-readable schedule, and last-run status badge
+- **Right panel** — run history for the selected job: each run shows status badge, run date, start timestamp, and expandable full container logs (stdout + stderr)
+
+**APScheduler behaviour:**
+- Scheduler starts with the UI container and loads all active jobs from DB on startup (survives container restarts via DB persistence)
+- Each scheduled trigger runs the ingestion pipeline (lake layer only) with `ingest_date = today()`
+- After each run, `last_run_at`, `last_run_status`, and full logs are written to `public.scheduled_job_runs`
+- Deleting a schedule soft-deletes the DB row (`is_active = FALSE`) and removes the APScheduler trigger
+
+**New Flask routes:**
+| Route | Method | Description |
+|---|---|---|
+| `/scheduled-jobs` | GET | List all active scheduled jobs |
+| `/scheduled-jobs` | POST | Create or update a scheduled job (upsert on application_name) |
+| `/scheduled-jobs/<id>` | DELETE | Soft-delete and remove from scheduler |
+| `/scheduled-job-runs` | GET | List run history (filter by `?job_id=<id>`) |
+
 ---
 
 ## Pipeline CLI Reference
@@ -570,9 +781,27 @@ docker compose run --rm pipeline \
 
 ---
 
+## Bronze Pipeline CLI Reference
+
+| Argument | Required | Default | Description |
+|---|---|---|---|
+| `--application-name` | Yes | — | Dataset identifier (must match the lake table name) |
+| `--run-date` | Yes | — | Date to process (`YYYY-MM-DD`) |
+| `--run-type` | No | `full` | `full` = lake run_date partition only; `delta` = snapshot union merge |
+| `--catalog` | No | `ICEBERG_CATALOG` env | Iceberg catalog name |
+| `--lake-database` | No | `LAKE_DATABASE` env | Source Iceberg namespace (default: `de_lake`) |
+| `--bronze-database` | No | `BRONZE_DATABASE` env | Target Iceberg namespace (default: `de_bronze`) |
+| `--metadata-key` | No | env | S3 key of the metadata sheet CSV |
+| `--log-level` | No | `INFO` | `DEBUG`, `INFO`, `WARNING`, `ERROR` |
+| `--log-folder` | No | `bronze` | Top-level folder in log bucket |
+
+---
+
 ## Metadata Sheet Format
 
 The pipeline is driven by a CSV metadata sheet uploaded to MinIO. Each row defines one column:
+
+### Lake ingestion columns
 
 | Column | Description |
 |---|---|
@@ -581,6 +810,15 @@ The pipeline is driven by a CSV metadata sheet uploaded to MinIO. Each row defin
 | `nullable` | `true` / `false` |
 | `pii_action` | `hash`, `mask`, `encrypt`, or blank (no action) |
 | `description` | Human-readable description |
+
+### Additional columns for the bronze layer
+
+| Column | Description |
+|---|---|
+| `primary_key` | `true` / `yes` / `1` — marks columns that together form the unique row key (used for deduplication) |
+| `is_timestamp` | `true` / `yes` / `1` — marks the timestamp column used to keep the latest row when duplicates exist on the primary key |
+
+> The bronze layer uses `primary_key` columns to deduplicate. If `is_timestamp` is set, the row with the highest timestamp value is kept; otherwise `dropDuplicates` is used. At least one `primary_key` column is required for `delta` mode.
 
 See `metadata/metadata_sheet_example.csv` for a working example.
 
@@ -602,6 +840,9 @@ The pipeline token written by `vault-init` is scoped to exactly these operations
 
 | Variable | Default | Description |
 |---|---|---|
+| `LAKE_DATABASE` | `de_lake` | Iceberg namespace for lake layer tables |
+| `BRONZE_DATABASE` | `de_bronze` | Iceberg namespace for bronze layer tables |
+| `BRONZE_DATA_BUCKET` | `de-data-bronze` | MinIO bucket for bronze Iceberg Parquet data |
 | `MINIO_ENDPOINT` | `http://minio:9000` | MinIO S3 API URL (internal) |
 | `MINIO_SERVER_URL` | `http://localhost:9000` | MinIO S3 public URL (embedded in redirects) |
 | `MINIO_BROWSER_REDIRECT_URL` | `http://localhost:9001` | MinIO Console public URL |
@@ -646,6 +887,7 @@ The pipeline token written by `vault-init` is scoped to exactly these operations
 | `requirements.txt` or `requirements-heavy.txt` | `docker compose build` |
 | `conf/spark-defaults.conf` | `docker compose build` (conf is baked into image) |
 | `ingestion/**` or `ui/**` | `docker compose build` |
+| `bronze_layer/**` | `docker compose build` (bronze_layer.zip is rebuilt in the image) |
 | `docker-compose.yml` only | `docker compose up -d` (no rebuild) |
 | `.env` only | `docker compose up -d` (no rebuild) |
 
@@ -653,8 +895,16 @@ The pipeline token written by `vault-init` is scoped to exactly these operations
 
 ## Troubleshooting
 
-**App returns 502 on Cloudflare**
-Check cloudflared is running: `docker compose ps cloudflared`. Confirm it uses `--protocol http2` (not quic) — QUIC fails silently under Docker Desktop's NAT.
+**App returns 502 on Cloudflare (intermittent — works on some devices, not others)**
+You likely have two cloudflared connectors attached to the same tunnel. This happens if a native `cloudflared` daemon (e.g. installed via Homebrew) is running alongside the Docker `cloudflared` container. Cloudflare round-robins between connectors — the native one can't reach `de-ui:5000` inside Docker networking, causing alternating 502s.
+
+Check in Cloudflare Zero Trust → Networks → Tunnels → your tunnel → Connectors. If you see two connectors, disable the native one:
+```bash
+sudo launchctl stop com.cloudflare.cloudflared
+sudo launchctl disable system/com.cloudflare.cloudflared
+```
+
+Only the Docker `cloudflared` container should be connected. Verify with `docker compose ps cloudflared` and confirm it uses `--protocol http2` (not quic) — QUIC fails silently under Docker Desktop's NAT.
 
 **Pipeline container exits immediately**
 Check logs: `docker compose logs pipeline`. Ensure `vault-init` completed and `minio` is healthy.
@@ -679,4 +929,17 @@ This is expected — the MinIO S3 API requires authenticated S3 requests. Use th
 ```bash
 mc alias set remote https://s3.atestingdomain.info <access-key> <secret-key>
 mc ls remote/
+```
+
+### MinIO CLI Access
+
+The `awscli` service provides an AWS CLI pre-configured to talk to MinIO — no `--endpoint-url` flag needed. The `docker/awscli-entrypoint.sh` entrypoint pre-sets `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, and `AWS_ENDPOINT_URL` from env vars automatically.
+
+```bash
+# Open an interactive shell with AWS CLI pre-configured for MinIO
+docker compose run --rm awscli shell
+
+# Run AWS CLI commands directly against MinIO
+docker compose run --rm awscli s3 ls
+docker compose run --rm awscli s3 ls s3://de-source-data-bucket/
 ```

@@ -8,6 +8,7 @@ _PROJECT_MODULES = frozenset({
     "pipeline",
     "config",
     "pyfiles",
+    "bronze_layer",
     "__main__",
 })
 

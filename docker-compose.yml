@@ -191,6 +191,23 @@ services:
     networks:
       - de-net
 
+  awscli:
+    image: amazon/aws-cli:latest
+    restart: "no"
+    depends_on:
+      minio:
+        condition: service_healthy
+    env_file:
+      - .env
+    environment:
+      MINIO_ENDPOINT:    http://minio:9000
+      AWS_DEFAULT_REGION: us-east-1
+    volumes:
+      - ./docker/awscli-entrypoint.sh:/entrypoint.sh:ro
+    entrypoint: ["/entrypoint.sh"]
+    networks:
+      - de-net
+
 volumes:
   minio_data:
     driver: local

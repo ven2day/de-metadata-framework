@@ -81,11 +81,39 @@ CREATE TABLE IF NOT EXISTS public.app_users (
     failed_attempts INTEGER      NOT NULL DEFAULT 0,
     locked_until    TIMESTAMPTZ
 );
+
+CREATE TABLE IF NOT EXISTS public.scheduled_jobs (
+    id                SERIAL        PRIMARY KEY,
+    application_name  VARCHAR(255)  NOT NULL,
+    cron_expression   VARCHAR(100)  NOT NULL,
+    source_type       VARCHAR(20)   NOT NULL DEFAULT 's3',
+    source_bucket     VARCHAR(500),
+    source_key        VARCHAR(500),
+    source_database   VARCHAR(255),
+    source_table_name VARCHAR(255),
+    metadata_key      VARCHAR(500),
+    write_mode        VARCHAR(20)   NOT NULL DEFAULT 'overwrite',
+    log_level         VARCHAR(10)   NOT NULL DEFAULT 'INFO',
+    is_active         BOOLEAN       NOT NULL DEFAULT TRUE,
+    created_at        TIMESTAMPTZ   NOT NULL DEFAULT NOW(),
+    last_run_at       TIMESTAMPTZ,
+    last_run_status   VARCHAR(20)
+);
+
+CREATE TABLE IF NOT EXISTS public.scheduled_job_runs (
+    id          SERIAL      PRIMARY KEY,
+    job_id      INTEGER     NOT NULL REFERENCES public.scheduled_jobs(id),
+    run_date    DATE        NOT NULL,
+    started_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    finished_at TIMESTAMPTZ,
+    status      VARCHAR(20),
+    logs        TEXT
+);
 """
 
 
 def init_schema():
-    """Create app_users table if it does not exist."""
+    """Create app_users, scheduled_jobs, and scheduled_job_runs tables if they do not exist."""
     conn = get_conn()
     with conn.cursor() as cur:
         cur.execute(_SCHEMA_SQL)

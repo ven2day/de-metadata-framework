@@ -154,7 +154,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         parser.error("--source-table-name is required when --source-type=database")
 
     # Derive output table name from application name if not explicitly provided
-    if not args.output_table_name:
-        args.output_table_name = args.application_name
+
+    args.output_table_name = args.application_name
 
     return args
