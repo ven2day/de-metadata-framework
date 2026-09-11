@@ -7,6 +7,7 @@ from ingestion.env.DE_Ingestion_properties import (
     ICEBERG_CATALOG, ICEBERG_METADATA_BUCKET,
     BRONZE_DATA_BUCKET, BRONZE_DATABASE, LAKE_DATABASE,
 )
+from ingestion.pyfiles.iceberg_repair import table_exists_safe
 from ingestion.pyfiles.logger import get_logger
 
 logger = get_logger(__name__)
@@ -64,25 +65,31 @@ def _write_bronze(
     catalog: str,
     bronze_db: str,
 ) -> None:
-    full_table = f"{catalog}.{bronze_db}.{app_name}"
-    data_path  = f"s3a://{BRONZE_DATA_BUCKET}/{app_name}"
-    meta_path  = f"s3a://{ICEBERG_METADATA_BUCKET}/bronze/{app_name}"
+    full_table     = f"{catalog}.{bronze_db}.{app_name}"
+    data_path      = f"s3a://{BRONZE_DATA_BUCKET}/{app_name}"
+    # "location" sets the Iceberg table's base directory in the HMS catalog entry.
+    # Metadata files land at  {location}/metadata/*.json / *.avro
+    # Data files are redirected to data_path via write.data.path.
+    table_location = f"s3a://{ICEBERG_METADATA_BUCKET}/de_bronze/{app_name}"
 
-    logger.info("Writing bronze Iceberg table '%s' (data=%s, meta=%s)", full_table, data_path, meta_path)
+    logger.info(
+        "Writing bronze Iceberg table '%s' (location=%s, data=%s)",
+        full_table, table_location, data_path,
+    )
 
     writer = (
         df.writeTo(full_table)
         .using("iceberg")
+        .tableProperty("location", table_location)
         .tableProperty("write.data.path", data_path)
-        .tableProperty("write.meta.path", meta_path)
         .partitionedBy(partitioning.days("snapshot_date"))
     )
 
-    if spark.catalog.tableExists(full_table):
-       writer.overwritePartitions()
+    if table_exists_safe(spark, full_table, table_location):
+        writer.overwritePartitions()
     else:
         logger.info("Creating table for the first Time !!!")
-        writer.createOrReplace()
+        writer.create()
     logger.info("Write complete — bronze table '%s'", full_table)
 
 

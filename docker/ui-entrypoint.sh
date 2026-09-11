@@ -19,7 +19,13 @@ if [ -f "/vault/secrets/supabase_db_password_ciphertext" ]; then
     export SUPABASE_DB_PASSWORD
 fi
 
-# 4. Seed root user (no-op if already exists)
+# 4. Install DBT packages (needed when transformation/ is a live volume mount)
+if [ -f "/app/transformation/packages.yml" ]; then
+    echo "[entrypoint] Running dbt deps..."
+    cd /app/transformation && dbt deps --profiles-dir /app/transformation --quiet && cd /app
+fi
+
+# 5. Seed root user (no-op if already exists)
 python3 /app/docker/seed_root_user.py
 
 exec python3 /app/ui/app.py

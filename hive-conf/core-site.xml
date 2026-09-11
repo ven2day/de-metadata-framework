@@ -1,0 +1,49 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<configuration>
+
+  <!-- ── S3A / MinIO ────────────────────────────────────────────────────────── -->
+  <property>
+    <name>fs.s3a.endpoint</name>
+    <value>http://minio:9000</value>
+  </property>
+  <property>
+    <name>fs.s3a.path.style.access</name>
+    <value>true</value>
+  </property>
+  <property>
+    <name>fs.s3a.connection.ssl.enabled</name>
+    <value>false</value>
+  </property>
+  <property>
+    <name>fs.s3a.aws.credentials.provider</name>
+    <value>org.apache.hadoop.fs.s3a.SimpleAWSCredentialsProvider</value>
+  </property>
+  <!-- ${env.VAR} is resolved by Hadoop's Configuration at load time -->
+  <property>
+    <name>fs.s3a.access.key</name>
+    <value>${env.AWS_ACCESS_KEY_ID}</value>
+  </property>
+  <property>
+    <name>fs.s3a.secret.key</name>
+    <value>${env.AWS_SECRET_ACCESS_KEY}</value>
+  </property>
+  <property>
+    <name>fs.s3a.impl</name>
+    <value>org.apache.hadoop.fs.s3a.S3AFileSystem</value>
+  </property>
+  <property>
+    <name>fs.AbstractFileSystem.s3a.impl</name>
+    <value>org.apache.hadoop.fs.s3a.S3A</value>
+  </property>
+
+  <!-- ── s3:// → S3A alias (Trino native-S3 uses s3://, HMS needs s3a://) ──── -->
+  <property>
+    <name>fs.s3.impl</name>
+    <value>org.apache.hadoop.fs.s3a.S3AFileSystem</value>
+  </property>
+  <property>
+    <name>fs.AbstractFileSystem.s3.impl</name>
+    <value>org.apache.hadoop.fs.s3a.S3A</value>
+  </property>
+
+</configuration>

@@ -1,4 +1,3 @@
-import json
 from argparse import Namespace
 from ast import literal_eval
 
@@ -7,6 +6,7 @@ from pyspark.sql.functions import months, to_date, lit, year, month
 from pyspark.sql.functions import partitioning
 
 from ingestion.env.DE_Ingestion_properties import ICEBERG_CATALOG, ICEBERG_DATABASE, ICEBERG_DATA_BUCKET, ICEBERG_METADATA_BUCKET
+from ingestion.pyfiles.iceberg_repair import drop_table_safe
 from ingestion.pyfiles.logger import get_logger
 
 logger = get_logger(__name__)
@@ -26,9 +26,19 @@ def write_to_minio(
     full_table = f"{catalog}.{database}.{table_name}"
 
     app_name = args.application_name
-    data_path = f"s3a://{ICEBERG_DATA_BUCKET}/{app_name}"
-    meta_location = f"s3a://{ICEBERG_METADATA_BUCKET}/{app_name}"
-    logger.info("Writing Iceberg table '%s' (mode=%s, data=%s, meta=%s)", full_table, mode, data_path, meta_location)
+    data_path    = f"s3a://{ICEBERG_DATA_BUCKET}/{app_name}"
+    # "location" sets the Iceberg table's base directory in the HMS catalog entry.
+    # Metadata files land at  {location}/metadata/*.json / *.avro
+    # Data files are redirected to data_path via write.data.path.
+    table_location = f"s3a://{ICEBERG_METADATA_BUCKET}/de_lake/{app_name}"
+    logger.info(
+        "Writing Iceberg table '%s' (mode=%s, location=%s, data=%s)",
+        full_table, mode, table_location, data_path,
+    )
+
+    # HMS requires the namespace to be registered before a table can be created in it.
+    # This is a no-op if the namespace already exists.
+    spark.sql(f"CREATE NAMESPACE IF NOT EXISTS {catalog}.{database}")
 
     df = df.withColumn(
         "ingest_date",
@@ -49,20 +59,16 @@ def write_to_minio(
     writer = (
         df.writeTo(full_table)
         .using("iceberg")
+        .tableProperty("location", table_location)
         .tableProperty("write.data.path", data_path)
-        .tableProperty("write.meta.path", meta_location)
         .partitionedBy(*d.keys(), partitioning.days("ingest_date"))
     )
     if mode.strip() == "append":
         writer.append()
     elif mode.strip() == "replace":
-        try:
-            spark.sql(f"""drop table {full_table}""")
-        except Exception as e:
-            logger.info("Table does not exists !!")
-        finally:
-            logger.info("Creating table from dataframe !!")
-        writer.createOrReplace()
+        drop_table_safe(spark, full_table, table_location)
+        logger.info("Creating table from dataframe !!")
+        writer.create()
     else:
         writer.overwritePartitions()
 

@@ -48,3 +48,15 @@ flask-wtf==1.2.2
 flask-limiter==4.1.1
 psycopg2-binary==2.9.12
 APScheduler==3.10.4
+
+# ── DBT (Silver layer — Trino adapter) ───────────────────────────────────────
+dbt-core>=1.8.0,<2.0.0
+dbt-trino>=1.8.0,<2.0.0
+PyYAML>=6.0
+
+
+# ── Trino Python client (Oracle loader reads Silver via Trino) ────────────────
+trino>=0.329.0
+
+# ── OpenAI (Silver builder: natural-language → SQL conversion) ────────────────
+openai>=1.0.0

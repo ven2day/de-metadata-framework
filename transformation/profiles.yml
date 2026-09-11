@@ -1,0 +1,21 @@
+de_transformation:
+  target: dev
+  outputs:
+    dev:
+      type:     trino
+      method:   none
+      host:     "{{ env_var('TRINO_HOST', 'localhost') }}"
+      port:     "{{ env_var('TRINO_PORT', '8081') | int }}"
+      user:     dbt
+      database: minio
+      schema:   de_silver
+      threads:  4
+    docker:
+      type:     trino
+      method:   none
+      host:     trino
+      port:     8080
+      user:     dbt
+      database: minio
+      schema:   de_silver
+      threads:  4

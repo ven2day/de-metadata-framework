@@ -1,24 +1,48 @@
 import base64
+import os
 
 import hvac
-from ingestion.env.DE_Ingestion_properties import VAULT_ADDR, VAULT_TOKEN, VAULT_NAMESPACE
+from ingestion.env.DE_Ingestion_properties import VAULT_ADDR, VAULT_NAMESPACE
 from ingestion.pyfiles.logger import get_logger
 
 logger = get_logger(__name__)
 
+_client: hvac.Client | None = None
 
+_TOKEN_FILE = "/vault/secrets/pipeline_token"
+
+
+def _read_token() -> str:
+    """Return VAULT_TOKEN from env first, then the secrets-volume file."""
+    token = os.environ.get("VAULT_TOKEN", "")
+    if not token and os.path.isfile(_TOKEN_FILE):
+        with open(_TOKEN_FILE) as fh:
+            token = fh.read().strip()
+    return token
 
 
 def get_vault_client() -> hvac.Client:
-    _client: hvac.Client | None = None
-    """Return an authenticated Vault client (singleton)."""
-    if _client is not None and _client.is_authenticated():
-        return _client
+    """Return an authenticated Vault client (module-level singleton with auto-renewal)."""
+    global _client
 
-    logger.info("Connecting to Vault")
+    if _client is not None:
+        try:
+            if _client.is_authenticated():
+                # Renew proactively so the 24h periodic token never expires mid-run.
+                try:
+                    _client.auth.token.renew_self()
+                except Exception:
+                    pass
+                return _client
+        except Exception:
+            pass
+
+    # (Re)build client — re-read token file in case vault-init wrote a fresh one.
+    token = _read_token()
+    logger.info("Connecting to Vault at %s", VAULT_ADDR)
     _client = hvac.Client(
         url=VAULT_ADDR,
-        token=VAULT_TOKEN,
+        token=token,
         namespace=VAULT_NAMESPACE or None,
     )
 
@@ -108,13 +132,15 @@ def get_transit_encryption_key(
     logger.info("Transit key exported")
     return key_material
 
-def get_encrypt_value(decrypt_value, key_name, key_type ="", mount_path="transit"):
+
+def get_encrypt_value(decrypt_value, key_name, key_type="", mount_path="transit"):
     decode_key = base64.b64decode(decrypt_value).decode('utf-8')
     client = get_vault_client()
-    response = base64.b64decode(client.secrets.transit.decrypt_data(
-    name=key_name,
-    ciphertext=decode_key,
-    mount_point=mount_path
-)['data']['plaintext']
+    response = base64.b64decode(
+        client.secrets.transit.decrypt_data(
+            name=key_name,
+            ciphertext=decode_key,
+            mount_point=mount_path,
+        )['data']['plaintext']
     ).decode('utf-8')
     return response

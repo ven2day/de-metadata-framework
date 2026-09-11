@@ -1,8 +1,15 @@
 #!/usr/bin/env python3
 """
-One-shot Vault bootstrap: initialize, unseal, seed secrets engines.
-Runs in the vault-init container on every `docker-compose up`.
-Idempotent — safe to re-run against an already-configured Vault.
+Vault bootstrap + seal-monitor daemon.
+
+On start:
+  1. Wait for Vault API to respond.
+  2. Initialize Vault if needed (1 key share / threshold 1).
+  3. Unseal if sealed.
+  4. Mount engines, seed secrets, create scoped pipeline token.
+
+After bootstrap, loops every 30 s watching for seal events (e.g. after a
+container restart) and re-unseals + refreshes the pipeline token automatically.
 """
 import base64
 import json
@@ -17,8 +24,14 @@ VAULT_PATH  = os.environ.get("VAULT_PATH", "encryption/pii")
 SALT_2      = os.environ.get("SALT_2", "")
 SUPABASE_PW = os.environ.get("SUPABASE_DB_PASSWORD_PLAIN", "")
 
-INIT_FILE   = "/vault/data/init.json"
-TOKEN_FILE  = "/vault/secrets/pipeline_token"
+ORACLE_USER            = os.environ.get("ORACLE_USER", "")
+ORACLE_PASSWORD        = os.environ.get("ORACLE_PASSWORD", "")
+ORACLE_DSN             = os.environ.get("ORACLE_DSN", "")
+ORACLE_WALLET_PASSWORD = os.environ.get("ORACLE_WALLET_PASSWORD", "")
+ORACLE_WALLET_ZIP_B64  = os.environ.get("ORACLE_WALLET_ZIP_B64", "")
+
+INIT_FILE        = "/vault/data/init.json"
+TOKEN_FILE       = "/vault/secrets/pipeline_token"
 SUPABASE_PW_FILE = "/vault/secrets/supabase_db_password_ciphertext"
 
 
@@ -40,11 +53,11 @@ def _put(path, data, token=None):
     return requests.put(f"{VAULT_ADDR}/v1/{path}", json=data, headers=_headers(token), timeout=5)
 
 
-# ── Bootstrap helpers ─────────────────────────────────────────────────────────
+# ── Status helpers ────────────────────────────────────────────────────────────
 
 def wait_for_vault():
     print("[vault-init] Waiting for Vault API...")
-    for attempt in range(60):
+    for _ in range(60):
         try:
             r = requests.get(f"{VAULT_ADDR}/v1/sys/health", timeout=3)
             # 200=ok, 429=standby, 501=not-init, 503=sealed — all mean "up"
@@ -59,9 +72,12 @@ def wait_for_vault():
 
 
 def vault_status():
+    """Return HTTP status code from /v1/sys/health (200=unsealed, 503=sealed, 501=not-init)."""
     r = requests.get(f"{VAULT_ADDR}/v1/sys/health", timeout=5)
-    return r.status_code   # 200=unsealed, 501=not-init, 503=sealed
+    return r.status_code
 
+
+# ── One-time bootstrap helpers ────────────────────────────────────────────────
 
 def enable_engine(path, engine_type, options=None, token=None):
     r = _get("sys/mounts", token)
@@ -86,36 +102,34 @@ def create_transit_key(name, exportable=False, token=None):
     print(f"[vault-init] Created transit key '{name}' (exportable={exportable})")
 
 
-# ── Main ──────────────────────────────────────────────────────────────────────
+def _write_pipeline_token(root_token):
+    """Create a scoped pipeline token and write it to TOKEN_FILE."""
+    r = _post(
+        "auth/token/create",
+        {"policies": ["pipeline-policy"], "ttl": "768h", "period": "768h", "renewable": True},
+        root_token,
+    )
+    r.raise_for_status()
+    pipeline_token = r.json()["auth"]["client_token"]
+    os.makedirs(os.path.dirname(TOKEN_FILE), exist_ok=True)
+    with open(TOKEN_FILE, "w") as f:
+        f.write(pipeline_token)
+    print(f"[vault-init] Pipeline token written → {TOKEN_FILE}")
 
-def main():
+
+# ── Full bootstrap (idempotent) ───────────────────────────────────────────────
+
+def bootstrap():
     wait_for_vault()
-
     status = vault_status()
 
     # ── Initialize ────────────────────────────────────────────────────────────
     if status == 501:
         print("[vault-init] Initializing Vault (1 key share / threshold 1)...")
-        r = _put(
-            "sys/init",
-            {
-                "secret_shares": 1,
-                "secret_threshold": 1
-            }
-        )
-
+        r = _put("sys/init", {"secret_shares": 1, "secret_threshold": 1})
         if not r.ok:
-            print(
-                f"[vault-init] Vault initialization failed: "
-                f"HTTP {r.status_code}",
-                file=sys.stderr
-            )
-            print(
-                f"[vault-init] Vault response: {r.text}",
-                file=sys.stderr
-            )
+            print(f"[vault-init] Vault initialization failed: HTTP {r.status_code}\n{r.text}", file=sys.stderr)
             r.raise_for_status()
-
         init_data = r.json()
         os.makedirs(os.path.dirname(INIT_FILE), exist_ok=True)
         with open(INIT_FILE, "w") as f:
@@ -123,7 +137,7 @@ def main():
         print(f"[vault-init] Vault initialized — credentials saved to {INIT_FILE}")
         status = 503  # now sealed
 
-    # ── Load saved init data ──────────────────────────────────────────────────
+    # ── Load init data ────────────────────────────────────────────────────────
     if not os.path.exists(INIT_FILE):
         print(f"[vault-init] ERROR: {INIT_FILE} not found — cannot unseal", file=sys.stderr)
         sys.exit(1)
@@ -145,9 +159,7 @@ def main():
     enable_engine("transit", "transit", token=root_token)
     enable_engine("secret", "kv", options={"version": "2"}, token=root_token)
 
-    # pii-encrypt: exportable — key material exported to Spark for AES encryption
     create_transit_key("pii-encrypt", exportable=True, token=root_token)
-    # supabase-pwd: non-exportable — used only for transit decrypt of DB password
     create_transit_key("supabase-pwd", exportable=False, token=root_token)
 
     # ── KV secret: PII salts ──────────────────────────────────────────────────
@@ -157,21 +169,32 @@ def main():
     r.raise_for_status()
     print(f"[vault-init] Wrote salt_2 → secret/data/{VAULT_PATH}")
 
-    # ── Encrypt Supabase DB password via Transit ──────────────────────────────
+    # ── Encrypt Supabase DB password ──────────────────────────────────────────
     os.makedirs("/vault/secrets", exist_ok=True)
     if SUPABASE_PW:
         plaintext_b64 = base64.b64encode(SUPABASE_PW.encode()).decode()
         r = _post("transit/encrypt/supabase-pwd", {"plaintext": plaintext_b64}, root_token)
         r.raise_for_status()
-        ciphertext     = r.json()["data"]["ciphertext"]          # vault:v1:...
-        ciphertext_b64 = base64.b64encode(ciphertext.encode()).decode()
+        ciphertext_b64 = base64.b64encode(r.json()["data"]["ciphertext"].encode()).decode()
         with open(SUPABASE_PW_FILE, "w") as f:
             f.write(ciphertext_b64)
-        print("[vault-init] Supabase password encrypted → written to secrets volume")
+        print("[vault-init] Supabase password encrypted → secrets volume")
     else:
-        print("[vault-init] WARNING: SUPABASE_DB_PASSWORD_PLAIN not set — skipping password encryption")
+        print("[vault-init] WARNING: SUPABASE_DB_PASSWORD_PLAIN not set — skipping")
 
-    # ── Pipeline policy ───────────────────────────────────────────────────────
+    # ── Oracle ADW credentials ────────────────────────────────────────────────
+    oracle_data = {
+        "oracle_user":            ORACLE_USER,
+        "oracle_password":        ORACLE_PASSWORD,
+        "oracle_dsn":             ORACLE_DSN,
+        "oracle_wallet_password": ORACLE_WALLET_PASSWORD,
+        "oracle_wallet_zip_b64":  ORACLE_WALLET_ZIP_B64,
+    }
+    r = _post("secret/data/oracle/adw", {"data": oracle_data}, root_token)
+    r.raise_for_status()
+    print("[vault-init] Wrote Oracle ADW credentials → secret/data/oracle/adw")
+
+    # ── Pipeline policy + token ───────────────────────────────────────────────
     policy_hcl = (
         'path "secret/data/*" { capabilities = ["read"] }\n'
         'path "transit/export/encryption-key/pii-encrypt" { capabilities = ["read"] }\n'
@@ -181,20 +204,44 @@ def main():
     r.raise_for_status()
     print("[vault-init] Pipeline policy written")
 
-    # ── Scoped pipeline token (renewable, 24 h period) ────────────────────────
-    r = _post(
-        "auth/token/create",
-        {"policies": ["pipeline-policy"], "ttl": "24h", "period": "24h", "renewable": True},
-        root_token,
-    )
-    r.raise_for_status()
-    pipeline_token = r.json()["auth"]["client_token"]
-    with open(TOKEN_FILE, "w") as f:
-        f.write(pipeline_token)
-    print(f"[vault-init] Pipeline token → {TOKEN_FILE}")
-
+    _write_pipeline_token(root_token)
     print("[vault-init] Bootstrap complete.")
+    return init_data
 
+
+# ── Seal monitor ──────────────────────────────────────────────────────────────
+
+def monitor(init_data):
+    """Loop forever; re-unseal and refresh the pipeline token whenever Vault is sealed."""
+    root_token = init_data["root_token"]
+    unseal_key = init_data["keys_base64"][0]
+
+    print("[vault-init] Seal monitor started (interval: 30 s)")
+    while True:
+        time.sleep(30)
+        try:
+            status = vault_status()
+            if status == 503:
+                print("[vault-init] Vault sealed — re-unsealing...")
+                r = _put("sys/unseal", {"key": unseal_key})
+                if r.ok:
+                    print("[vault-init] Vault re-unsealed — refreshing pipeline token")
+                    _write_pipeline_token(root_token)
+                else:
+                    print(f"[vault-init] Re-unseal failed (HTTP {r.status_code}): {r.text}", file=sys.stderr)
+        except Exception as exc:
+            print(f"[vault-init] Monitor error: {exc}", file=sys.stderr)
+
+
+# ── Entry point ───────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
-    main()
+    try:
+        init_data = bootstrap()
+    except SystemExit:
+        raise
+    except Exception as exc:
+        print(f"[vault-init] Bootstrap failed: {exc}", file=sys.stderr)
+        sys.exit(1)
+
+    monitor(init_data)

@@ -1,0 +1,22 @@
+# Stage 1 — download the PostgreSQL JDBC driver (not bundled in Hive 4.0.0)
+FROM alpine:3.19 AS downloader
+RUN wget -q \
+    https://repo1.maven.org/maven2/org/postgresql/postgresql/42.7.3/postgresql-42.7.3.jar \
+    -O /tmp/postgresql-42.7.3.jar
+
+# Stage 2 — build the HMS image
+FROM apache/hive:4.0.0
+USER root
+
+# PostgreSQL JDBC driver for schematool + runtime HMS connections
+COPY --from=downloader /tmp/postgresql-42.7.3.jar /opt/hive/lib/postgresql-42.7.3.jar
+
+# S3A JARs ship with Hadoop but are not on Hive's default classpath.
+# Copying them into /opt/hive/lib/ puts them on the classpath unconditionally,
+# which lets HMS mkdir/isDir namespace locations stored in S3.
+RUN cp /opt/hadoop/share/hadoop/tools/lib/hadoop-aws-3.3.6.jar \
+       /opt/hive/lib/hadoop-aws-3.3.6.jar && \
+    cp /opt/hadoop/share/hadoop/tools/lib/aws-java-sdk-bundle-1.12.367.jar \
+       /opt/hive/lib/aws-java-sdk-bundle-1.12.367.jar
+
+USER hive

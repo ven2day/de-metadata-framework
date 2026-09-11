@@ -2,19 +2,22 @@
 # DE Metadata Framework — Docker Compose
 # =============================================================
 # Services:
-#   minio        — S3-compatible object store (data lake + logs)
-#   minio-init   — one-shot bucket provisioner
-#   vault        — HashiCorp Vault (file backend, persistent)
-#   vault-init   — one-shot Vault bootstrapper (unseals + seeds secrets)
-#   ui           — Flask web UI (always running)
-#   pipeline     — spark-submit runner (on-demand via `docker-compose run`)
-#   cloudflared  — Cloudflare Tunnel (routes atestingdomain.info → local services)
+#   minio            — S3-compatible object store (data lake + logs)
+#   minio-init       — one-shot bucket provisioner
+#   vault            — HashiCorp Vault (file backend, persistent)
+#   vault-init       — Vault bootstrap daemon (unseals + seeds secrets, monitors for re-seal)
+#   postgres-meta    — PostgreSQL backend for Hive Metastore
+#   hive-metastore   — Iceberg catalog registry (HMS)
+#   trino            — SQL engine for DBT silver transformations
+#   ui               — Flask web UI (always running)
+#   pipeline         — spark-submit runner (on-demand via `docker-compose run`)
+#   cloudflared      — Cloudflare Tunnel (routes atestingdomain.info → local services)
 #
 # First-time setup:
 #   1. Add SALT_2 and SUPABASE_DB_PASSWORD_PLAIN to .env
 #   2. Add CLOUDFLARE_TUNNEL_TOKEN to .env (from Cloudflare Zero Trust dashboard)
 #   3. docker-compose up -d minio vault      # start infrastructure
-#   4. docker-compose run --rm vault-init    # bootstrap Vault once
+#   4. docker-compose up -d vault-init       # start vault daemon (bootstraps automatically)
 #   5. docker-compose up -d ui              # start the UI + tunnel
 #
 # Subsequent starts: docker-compose up -d
@@ -69,6 +72,8 @@ services:
         mc mb --ignore-existing local/de-metadata-bucket &&
         mc mb --ignore-existing local/de-data-migration-logs &&
         mc mb --ignore-existing local/de-data-bronze &&
+        mc mb --ignore-existing local/de-data-transformation &&
+        mc mb --ignore-existing local/de-data-silver &&
         echo 'All buckets ready'
       "
     networks:
@@ -79,16 +84,18 @@ services:
     image: hashicorp/vault:latest
     container_name: vault
     restart: unless-stopped
+    mem_limit: 256m
     cap_add:
       - IPC_LOCK   # prevents secret memory from being swapped to disk
     environment:
       VAULT_ADDR: http://127.0.0.1:8200
       VAULT_LOCAL_CONFIG: |
         {
-          "storage":  {"file": {"path": "/vault/data"}},
-          "listener": [{"tcp": {"address": "0.0.0.0:8200", "tls_disable": "true"}}],
-          "ui":       true,
-          "api_addr": "https://vault.atestingdomain.info"
+          "storage":       {"file": {"path": "/vault/data"}},
+          "listener":      [{"tcp": {"address": "0.0.0.0:8200", "tls_disable": "true"}}],
+          "ui":            true,
+          "api_addr":      "https://vault.atestingdomain.info",
+          "disable_mlock": true
         }
     command: server
     ports:
@@ -105,12 +112,14 @@ services:
     networks:
       - de-net
 
-  # ── Vault Init — bootstrap secrets ─────────────────────────────────────────
+  # ── Vault Init — bootstrap + seal-monitor daemon ───────────────────────────
+  # Runs bootstrap once, then loops every 30 s re-unsealing Vault if it restarts.
+  # Other services depend on this being healthy (= vault is unsealed).
   vault-init:
     build: .
     container_name: vault-init
     entrypoint: ["python3", "/app/docker/vault_init.py"]
-    restart: "no"
+    restart: unless-stopped
     depends_on:
       vault:
         condition: service_healthy
@@ -122,6 +131,99 @@ services:
       VAULT_PATH:                 ${VAULT_PATH:-encryption/pii}
       SALT_2:                     ${SALT_2:-}
       SUPABASE_DB_PASSWORD_PLAIN: ${SUPABASE_DB_PASSWORD_PLAIN:-}
+      ORACLE_USER:                ${ORACLE_USER:-}
+      ORACLE_PASSWORD:            ${ORACLE_PASSWORD:-}
+      ORACLE_DSN:                 ${ORACLE_DSN:-}
+      ORACLE_WALLET_PASSWORD:     ${ORACLE_WALLET_PASSWORD:-}
+      ORACLE_WALLET_ZIP_B64:      ${ORACLE_WALLET_ZIP_B64:-}
+    healthcheck:
+      # Healthy when Vault is initialized and unsealed (HTTP 200)
+      test: ["CMD-SHELL", "curl -sf http://vault:8200/v1/sys/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 60s
+    networks:
+      - de-net
+
+  # ── PostgreSQL — Hive Metastore backend ────────────────────────────────────
+  postgres-meta:
+    image: postgres:15
+    container_name: postgres-meta
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB:       metastore
+      POSTGRES_USER:     hive
+      POSTGRES_PASSWORD: hive
+    volumes:
+      - postgres_meta_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U hive -d metastore"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    networks:
+      - de-net
+
+  # ── Hive Metastore — Iceberg catalog registry ───────────────────────────────
+  hive-metastore:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.hms
+    container_name: hive-metastore
+    restart: unless-stopped
+    depends_on:
+      postgres-meta:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    environment:
+      SERVICE_NAME: metastore
+      DB_DRIVER: postgres
+      SERVICE_OPTS: >-
+        -Djavax.jdo.option.ConnectionDriverName=org.postgresql.Driver
+        -Djavax.jdo.option.ConnectionURL=jdbc:postgresql://postgres-meta:5432/metastore
+        -Djavax.jdo.option.ConnectionUserName=hive
+        -Djavax.jdo.option.ConnectionPassword=hive
+      HIVE_CUSTOM_CONF_DIR: /hive-custom-conf
+      AWS_ACCESS_KEY_ID:     ${MINIO_ACCESS_KEY:-minioadmin}
+      AWS_SECRET_ACCESS_KEY: ${MINIO_SECRET_KEY:-minioadmin}
+    volumes:
+      - ./hive-conf:/hive-custom-conf:ro
+    ports:
+      - "9083:9083"
+    healthcheck:
+      test: ["CMD-SHELL", "bash -c '</dev/tcp/localhost/9083' 2>/dev/null && echo ok || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 18
+      start_period: 40s
+    networks:
+      - de-net
+
+  # ── Trino — SQL query engine for DBT silver transformations ────────────────
+  trino:
+    image: trinodb/trino:482
+    container_name: trino
+    restart: unless-stopped
+    depends_on:
+      hive-metastore:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    environment:
+      MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY:-minioadmin}
+      MINIO_SECRET_KEY: ${MINIO_SECRET_KEY:-minioadmin}
+    volumes:
+      - ./trino/etc:/etc/trino:ro
+    ports:
+      - "8081:8080"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/v1/info"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
     networks:
       - de-net
 
@@ -137,18 +239,25 @@ services:
       minio-init:
         condition: service_completed_successfully
       vault-init:
-        condition: service_completed_successfully
+        condition: service_healthy
     env_file:
       - .env
     environment:
       MINIO_ENDPOINT:       http://minio:9000
       SOURCE_S3_ENDPOINT:   http://minio:9000
+      VAULT_ADDR:           http://vault:8200
       COMPOSE_PROJECT_NAME: de-metadata-framework
       AWS_REGION:           us-east-1
       AWS_DEFAULT_REGION:   us-east-1
+      OPENAI_API_KEY:       ${OPENAI_API_KEY:-}
+      OPENAI_MODEL:         ${OPENAI_MODEL:-gpt-4.1-nano}
+      TRINO_HOST:           trino
+      TRINO_PORT:           "8080"
+      BEHIND_HTTPS_PROXY:   "1"
     volumes:
       - vault_secrets:/vault/secrets:ro
       - /var/run/docker.sock:/var/run/docker.sock
+      - ./transformation:/app/transformation   # live mount so DBT models written by the UI persist
     ports:
       - "5001:5000"
     networks:
@@ -176,14 +285,18 @@ services:
     restart: "no"
     depends_on:
       vault-init:
-        condition: service_completed_successfully
+        condition: service_healthy
       minio:
+        condition: service_healthy
+      hive-metastore:
         condition: service_healthy
     env_file:
       - .env
     environment:
       MINIO_ENDPOINT:     http://minio:9000
       SOURCE_S3_ENDPOINT: http://minio:9000
+      VAULT_ADDR:         http://vault:8200
+      VAULT_PATH:         ${VAULT_PATH:-encryption/pii}
       AWS_REGION:         us-east-1
       AWS_DEFAULT_REGION: us-east-1
     volumes:
@@ -191,22 +304,6 @@ services:
     networks:
       - de-net
 
-  awscli:
-    image: amazon/aws-cli:latest
-    restart: "no"
-    depends_on:
-      minio:
-        condition: service_healthy
-    env_file:
-      - .env
-    environment:
-      MINIO_ENDPOINT:    http://minio:9000
-      AWS_DEFAULT_REGION: us-east-1
-    volumes:
-      - ./docker/awscli-entrypoint.sh:/entrypoint.sh:ro
-    entrypoint: ["/entrypoint.sh"]
-    networks:
-      - de-net
 
 volumes:
   minio_data:
@@ -214,6 +311,8 @@ volumes:
   vault_data:
     driver: local
   vault_secrets:
+    driver: local
+  postgres_meta_data:
     driver: local
 
 networks:

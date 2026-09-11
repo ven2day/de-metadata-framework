@@ -1,3 +1,4 @@
+import pandas as pd
 from pyspark.sql import DataFrame, functions as F
 from pyspark.sql.connect.functions import aes_encrypt
 from pyspark.sql.functions import concat_ws, lit, col, sha2, md5
@@ -13,27 +14,31 @@ salt = _SALT_BYTES
 
 
 def _make_hash_udf():
+    _salt = salt  # capture in closure for Arrow batch serialisation
 
-
-    def _hash(value):
-        if value is None:
-            return None
+    @F.pandas_udf(StringType())
+    def _hash_vec(s: pd.Series) -> pd.Series:
         import hmac, hashlib
-        return hmac.new(salt, str(value).encode("utf-8"), hashlib.sha256).hexdigest()
+        def _h(v):
+            if v is None:
+                return None
+            return hmac.new(_salt, str(v).encode("utf-8"), hashlib.sha256).hexdigest()
+        return s.apply(_h)
 
-    return F.udf(_hash, StringType())
+    return _hash_vec
 
 
 def _make_mask_udf():
-    def mask(value):
-        if value is None:
-            return None
-        s = str(value)
-        if len(s) <= 4:
-            return "****"
-        return s[:2] + "*" * (len(s) - 4) + s[-2:]
+    @F.pandas_udf(StringType())
+    def _mask_vec(s: pd.Series) -> pd.Series:
+        def _m(v):
+            if v is None:
+                return None
+            t = str(v)
+            return "****" if len(t) <= 4 else t[:2] + "*" * (len(t) - 4) + t[-2:]
+        return s.apply(_m)
 
-    return F.udf(mask, StringType())
+    return _mask_vec
 
 
 def apply_pii(df: DataFrame, metadata_df: DataFrame) -> DataFrame:

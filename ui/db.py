@@ -62,6 +62,14 @@ def get_conn() -> "psycopg2.extensions.connection":
     return _conn
 
 
+def get_fresh_conn() -> "psycopg2.extensions.connection":
+    """Create a brand-new connection — never cached. Use in background threads to avoid sharing the global connection."""
+    dsn = _pg_dsn()
+    conn = psycopg2.connect(dsn) if isinstance(dsn, str) else psycopg2.connect(**dsn)
+    conn.autocommit = False
+    return conn
+
+
 def cursor() -> RealDictCursor:
     return get_conn().cursor(cursor_factory=RealDictCursor)
 

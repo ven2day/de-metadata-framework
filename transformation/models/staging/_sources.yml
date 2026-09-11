@@ -1,0 +1,12 @@
+version: 2
+
+sources:
+  - name: de_bronze
+    description: "Bronze Iceberg tables written by the Spark ingestion pipeline"
+    database: minio
+    schema: de_bronze
+    tables:
+      - name: bronze_table
+        description: >
+          Replace this with your actual bronze table name.
+          Table names match the application_name used in the ingestion job.

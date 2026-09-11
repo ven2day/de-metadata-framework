@@ -1,945 +1,1053 @@
 # DE Metadata Framework
 
-A metadata-driven data ingestion pipeline built on Apache Spark and Apache Iceberg. Reads from S3-compatible storage or PostgreSQL (Supabase), applies schema validation, type casting, and PII processing, then writes Iceberg tables to MinIO. Ships with a Flask web UI with login-based access control, HashiCorp Vault for secrets management, and full Docker orchestration exposed publicly via Cloudflare Tunnel.
+A self-hosted, end-to-end data engineering platform implementing the **Medallion Architecture** (Lake → Bronze → Silver → Gold) with a metadata-driven pipeline, web UI, real-time log streaming, and Oracle ADW integration — fully containerised with Docker Compose.
 
 ---
 
-## Architecture
+## Table of Contents
 
-### High-Level Architecture
+1. [Architecture Overview (HLD)](#architecture-overview-hld)
+2. [Data Pipeline Flow](#data-pipeline-flow)
+3. [Low-Level Design (LLD)](#low-level-design-lld)
+4. [Services & Infrastructure](#services--infrastructure)
+5. [Folder Structure](#folder-structure)
+6. [Layer Functionality](#layer-functionality)
+7. [Web UI Features](#web-ui-features)
+8. [Scheduling System](#scheduling-system)
+9. [Security & Secrets Management](#security--secrets-management)
+10. [API Reference](#api-reference)
+11. [Environment Variables](#environment-variables)
+12. [Setup & Deployment](#setup--deployment)
+13. [Tech Stack](#tech-stack)
 
-Data flows from external sources through the pipeline into a Medallion Iceberg data lake (Lake → Bronze). The web UI is gated behind authentication; consumers query tables directly.
+---
+
+## Architecture Overview (HLD)
 
 ```
-                        ┌───────────────────────────────────────────────────────────────────────────────────────────┐
-  Raw Data Sources      │                              DE Metadata Framework                                        │   Consumers
-                        │                                                                                           │
-  ┌──────────────────┐  │  ┌─────────────────────────────────────────────────────────────────────────────────────┐  │
-  │  S3 Bucket       │  │  │  STEP 1 — INGESTION                                                                 │  │
-  │  · .csv          ├──┼─▶│                                                                                     │  │
-  │  · .json         │  │  │  ┌─────────────────────────────────────────────────────────────────────────────┐    │  │
-  │  · .parquet      │  │  │  │  Spark ETL Pipeline                                                         │    │  │
-  └──────────────────┘  │  │  │  1. Read source data (S3 multi-format or Supabase/PostgreSQL JDBC)          │    │  │
-                        │  │  │  2. Apply Metadata Sheet: aliasing · type casting · PII hash/mask/encrypt   │    │  │
-  ┌──────────────────┐  │  │  └─────────────────────────────────────────────────────────────────────────────┘    │  │
-  │  Supabase /      ├──┼─▶│                                    │                                                │  │
-  │  PostgreSQL      │  │  │                                    ▼                                                │  │
-  └──────────────────┘  │  │  ┌─────────────────────────────────────────────────────────────────────────────┐    │  │
-                        │  │  │  Iceberg Table — LAKE LAYER  (minio.de_lake.<app>)                          │    │  │
-  ┌──────────────────┐  │  │  │  data → s3a://de-data-lake/<app>/                                           ├─── ┼──┼──▶ BI / Spark
-  │  Metadata Sheet  ├──┼─▶┼  │  meta → s3a://de-iceberg-warehouse-bucket/de_lake/<app>/                    │    │  │    query engine
-  │  CSV             │  │  │  │  partition: days(ingest_date)                                               │    │  │
-  │  (de-metadata-   │  │  │  └─────────────────────────────────────────────────────────────────────────────┘    │  │
-  │   bucket)        │  │  └─────────────────────────────────────────────────────────────────────────────────────┘  │
-  │                  │  │                            │                                                              │
-  │  (shared by      │  │              ┌─────────────┘  ingestion must complete before bronze runs                  │ 
-  │  ingestion and   │  │              ▼                                                                            │
-  │  bronze)         │  │  ┌─────────────────────────────────────────────────────────────────────────────────────┐  │
-  └──────┬───────────┘  │  │  STEP 2 — BRONZE  (reads Metadata Sheet for primary_key + is_timestamp columns)     │  │
-         │              │  │                                                                                     │  │
-         └─────────────▶┼──┤  ┌──────────────────────────────┐  ┌──────────────────────────────────────────┐     │  │
-                        │  │  │  FULL LOAD                   │  │  DELTA                                   │     │  │
-                        │  │  │  ──────────────────────────  │  │  ──────────────────────────────────────  │     │  │
-                        │  │  │  1. Read lake table filtered │  │  1. Read lake[ingest_date = run_date]    │     │  │
-                        │  │  │     by ingest_date=run_date  │  │  2. Read bronze[snapshot_date<run_date]  │     │  │
-                        │  │  │  2. Dedup by primary_key +   │  │  3. Dedup lake by primary_key +          │     │  │
-                        │  │  │     timestamp/date col       │  │     timestamp/date col                   │     │  │
-                        │  │  │     → keep latest per key    │  │  4. Union new (wins) + prev snapshot     │     │  │
-                        │  │  │  3. snapshot_date = run_date │  │  5. snapshot_date = run_date             │     │  │
-                        │  │  └──────────────────────────────┘  └──────────────────────────────────────────┘     │  │
-                        │  │                                    │                                                │  │
-                        │  │                                    ▼                                                │  │
-                        │  │  ┌─────────────────────────────────────────────────────────────────────────────┐    │  │
-                        │  │  │  Iceberg Table — BRONZE LAYER  (minio.de_bronze.<app>)                      │    │  │
-                        │  │  │  data → s3a://de-data-bronze/<app>/                                         ├─── ┼──┼──▶ BI / Spark
-                        │  │  │  meta → s3a://de-iceberg-warehouse-bucket/de_bronze/<app>/                  │    │  │    query engine
-                        │  │  │  partition: days(snapshot_date)                                             │    │  │
-                        │  │  └─────────────────────────────────────────────────────────────────────────────┘    │  │
-                        │  └─────────────────────────────────────────────────────────────────────────────────────┘  │
-                        │                                                                                           │
-                        │  ┌─────────────────────────────────────────────────────────────────────────────────────┐  │
-  ┌──────────────────┐  │  │  Flask Web UI (login-protected)                                                     │  │
-  │  Engineer        ├──┼─▶│  Submit ingestion and bronze jobs · Stream logs · Manage users · Schedule jobs      │  │
-  │  (browser)       │  │  └─────────────────────────────────────────────────────────────────────────────────────┘  │
-  └──────────────────┘  └───────────────────────────────────────────────────────────────────────────────────────────┘
-                                                        ▲
-                                          Cloudflare Tunnel (cloudflared)
-                                          app / minio / s3 / vault subdomains
+  ┌───────────────────────────────────────────────────────────┐
+  │                      DATA SOURCES                         │
+  │   ┌─────────────────────────┐  ┌────────────────────────┐ │
+  │   │   Object Storage        │  │  Operational Databases │ │
+  │   │   AWS S3  ·  MinIO      │  │  Supabase · PostgreSQL │ │
+  │   │   CSV · JSON · Parquet  │  │  (and others)          │ │
+  │   └────────────┬────────────┘  └────────────┬───────────┘ │
+  └────────────────┼──────────────────────────-─┼─────────────┘
+                   └─────────────┬──────────────┘
+                                 │  Extract
+                                 ▼
+  ┌───────────────────────────────────────────────────────────┐
+  │  INGESTION LAYER                                          │
+  │  ·  ·  ·  ·  ·  ·  ·  ·  ·  ·  ·  ·  ·  ·  ·  ·  ·  · │
+  │  ①  Schema & column correctness validation               │
+  │  ②  Data quality checks                                  │
+  │  ③  Metadata-driven PII processing  (Data Governance)    │
+  │       Hash    —  HMAC-SHA256 + SALT  (Vault KV)          │
+  │       Mask    —  Partial redaction   AB****YZ            │
+  │       Encrypt —  AES-256  (Vault Transit engine)         │
+  │  ④  Partition by  ingest_date                            │
+  │  ⑤  Write Iceberg table  →  de_lake                     │
+  └─────────────────────────────┬─────────────────────────────┘
+                                │
+                                ▼
+  ╔═══════════════════════════════════════════════════════════╗
+  ║  LAKE  ·  de_lake                                         ║
+  ║  Iceberg  ·  Parquet  ·  partitioned by  ingest_date      ║
+  ╚═══════════════════════════════════════════════════════════╝
+                                │
+                                ▼
+  ┌───────────────────────────────────────────────────────────┐
+  │  BRONZE LAYER                                             │
+  │  ·  ·  ·  ·  ·  ·  ·  ·  ·  ·  ·  ·  ·  ·  ·  ·  ·  · │
+  │  ①  Fetch lake data for current  ingest_date             │
+  │  ②  Compare against last available Bronze  snapshot_date │
+  │  ③  Dedup by Primary Keys                                │
+  │       Full  —  complete table refresh                    │
+  │       Delta —  DELETE stale PKs  →  INSERT new rows      │
+  │  ④  Partition by  snapshot_date                          │
+  │  ⑤  Write Iceberg table  →  de_bronze                   │
+  └─────────────────────────────┬─────────────────────────────┘
+                                │
+                                ▼
+  ╔═══════════════════════════════════════════════════════════╗
+  ║  BRONZE  ·  de_bronze                                     ║
+  ║  Iceberg  ·  Parquet  ·  partitioned by  snapshot_date    ║
+  ╚═══════════════════════════════════════════════════════════╝
+                                │
+                                ▼
+  ┌──────────────────────────────────────────── DBT + Trino ──┐
+  │  SILVER LAYER                                             │
+  │  ·  ·  ·  ·  ·  ·  ·  ·  ·  ·  ·  ·  ·  ·  ·  ·  ·  · │
+  │  ①  SQL transformations on Bronze Iceberg tables         │
+  │  ②  Metadata-driven column mapping & business logic      │
+  │  ③  Materialization strategy                             │
+  │       append        —  INSERT new rows                   │
+  │       overwrite     —  DROP table  →  full reload        │
+  │       incremental   —  upsert by primary key             │
+  │  ④  Write Iceberg table  →  de_silver                   │
+  └─────────────────────────────┬─────────────────────────────┘
+                                │
+                                ▼
+  ╔═══════════════════════════════════════════════════════════╗
+  ║  SILVER  ·  de_silver                                     ║
+  ║  Iceberg  ·  Parquet  ·  Snappy compressed                ║
+  ╚═══════════════════════════════════════════════════════════╝
+                                │
+                                ▼
+  ┌───────────────────────────────────────────────────────────┐
+  │  GOLD LAYER                                               │
+  │  ·  ·  ·  ·  ·  ·  ·  ·  ·  ·  ·  ·  ·  ·  ·  ·  ·  · │
+  │  ①  Trino SELECT *  from  de_silver.<table>              │
+  │  ②  Load strategy                                        │
+  │       append          —  INSERT all rows                 │
+  │       truncate         —  TRUNCATE  →  INSERT            │
+  │       delete_and_insert —  DELETE date partition → INSERT │
+  │  ③  Trino → Oracle type mapping                         │
+  │  ④  Batch insert  (5 000 rows / batch)                  │
+  │  ⑤  Write  →  Oracle Autonomous AI Data Warehouse       │
+  └─────────────────────────────┬─────────────────────────────┘
+                                │
+                                ▼
+  ╔═══════════════════════════════════════════════════════════╗
+  ║  GOLD  ·  Oracle Autonomous AI Data Warehouse             ║
+  ║  Auto-provisioned tables  ·  Type-mapped columns          ║
+  ╚═══════════════════════════════════════════════════════════╝
+                                │
+                                ▼
+  ┌───────────────────────────────────────────────────────────┐
+  │  BI / Analytics Consumers                                 │
+  │  Dashboards  ·  Reports  ·  Data Products                 │
+  └───────────────────────────────────────────────────────────┘
+
+  ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─
+  PLATFORM INFRASTRUCTURE  (Docker Compose)
+
+  ┌─────────────────┐  ┌─────────────────┐  ┌──────────────┐
+  │  MinIO  :9000   │  │ HashiCorp Vault  │  │     Hive     │
+  │  S3 Object Store│  │ :8200           │  │  Metastore   │
+  │  8 S3 buckets   │  │ PII keys        │  │  :9083       │
+  │                 │  │ Oracle ADW creds│  │  Iceberg     │
+  │                 │  │ Supabase pwd    │  │  Catalog     │
+  └─────────────────┘  └─────────────────┘  └──────────────┘
+  ┌─────────────────┐  ┌─────────────────┐  ┌──────────────┐
+  │  Trino  :8081   │  │  Flask Web UI   │  │  Cloudflare  │
+  │  SQL Engine     │  │  :5001          │  │  Tunnel      │
+  │  DBT adapter    │  │  Pipeline ctrl  │  │  HTTPS proxy │
+  │                 │  │  Scheduling     │  │  ·.info      │
+  │                 │  │  Log streaming  │  │              │
+  └─────────────────┘  └─────────────────┘  └──────────────┘
 ```
 
-**Data flow summary (Medallion Architecture):**
+---
 
-**Step 1 — Ingestion** (`--run-type` not applicable — always a full source read)
+## Data Pipeline Flow
 
-| Step | What happens |
-|---|---|
-| 1 | Engineer submits a job via the Web UI or CLI |
-| 2 | UI spawns a fresh pipeline container via Docker socket |
-| 3 | Reads **Metadata Sheet CSV** from `de-metadata-bucket` — defines columns, types, aliases, and PII actions |
-| 4 | Reads raw source data — **S3** (`.csv` / `.json` / `.parquet`) or **Supabase / PostgreSQL** via JDBC |
-| 5 | Applies schema: column aliasing, type casting, PII processing (hash / mask / encrypt) |
-| 6 | Writes **Iceberg table** `minio.de_lake.<app>` — data path `s3a://de-data-lake/<app>/`, meta path `s3a://de-iceberg-warehouse-bucket/de_lake/<app>/`, partitioned by `days(ingest_date)` |
-| 7 | Uploads run log → `s3a://de-data-migration-logs/lake/<app>/<date>/` |
-| 8 | Sends success / failure email via Brevo |
+```
+  ┌────────────────────────────────────────────────────────┐
+  │  1. INGESTION LAYER  (Lake)                            │
+  │                                                        │
+  │  Source S3 Bucket  /  Supabase PostgreSQL              │
+  │         │                                              │
+  │         ▼                                              │
+  │  Schema validation & type casting                      │
+  │         │                                              │
+  │         ▼                                              │
+  │  PII processing  (Hash / Mask / AES-256 via Vault)     │
+  │         │                                              │
+  │         ▼                                              │
+  │  Write Parquet  ──►  de-data-lake                      │
+  └──────────────────────────┬─────────────────────────────┘
+                             │
+  ┌──────────────────────────▼─────────────────────────────┐
+  │  2. BRONZE LAYER                                       │
+  │                                                        │
+  │  Read Parquet from de-data-lake  (Spark)               │
+  │         │                                              │
+  │         ├── full  ──►  Drop & recreate Iceberg table   │
+  │         │                                              │
+  │         └── delta ──►  Dedup by PK + timestamp         │
+  │                        DELETE matching PKs, INSERT new │
+  │         │                                              │
+  │         ▼                                              │
+  │  Write Iceberg  ──►  de-data-bronze                    │
+  └──────────────────────────┬─────────────────────────────┘
+                             │
+  ┌──────────────────────────▼─────────────────────────────┐
+  │  3. SILVER LAYER  (DBT + Trino)                        │
+  │                                                        │
+  │  UI column mapper  ──►  generate DBT model SQL         │
+  │         │                                              │
+  │         ▼                                              │
+  │  Write  transformation/models/silver/<model>.sql       │
+  │         │                                              │
+  │         ▼                                              │
+  │  dbt run --select <model>  via Trino adapter           │
+  │         │                                              │
+  │         ▼                                              │
+  │  Verify row count  (Trino SELECT COUNT)                │
+  │         │                                              │
+  │         ▼                                              │
+  │  Write Iceberg  ──►  de-data-silver                    │
+  └──────────────────────────┬─────────────────────────────┘
+                             │
+  ┌──────────────────────────▼─────────────────────────────┐
+  │  4. GOLD LAYER  (Oracle ADW)                           │
+  │                                                        │
+  │  Trino SELECT * from minio.de_silver.<table>           │
+  │         │                                              │
+  │         ├── append          ──►  INSERT 5 000 rows     │
+  │         ├── truncate         ──►  TRUNCATE + INSERT    │
+  │         └── delete_and_insert ──►  DELETE date+INSERT  │
+  │         │                                              │
+  │         ▼                                              │
+  │  Oracle ADW  target table                              │
+  └────────────────────────────────────────────────────────┘
+```
 
-**Step 2 — Bronze** (`--run-type full` or `--run-type delta` — runs after ingestion completes)
+---
 
-Both modes read the **same Metadata Sheet CSV** to identify `primary_key` and `is_timestamp` columns.
+## Low-Level Design (LLD)
 
-| Step | Full Load | Delta |
+### Ingestion Layer — Component Detail
+
+```
+  SOURCE READERS
+  ┌────────────────────────────┐  ┌──────────────────────────┐
+  │  s3_reader.py              │  │  supabase_reader.py      │
+  │  Read CSV/JSON/Parquet     │  │  Read PostgreSQL tables  │
+  └──────────────┬─────────────┘  └──────────────┬───────────┘
+                 └──────────────┬─────────────────┘
+                                │
+                                ▼
+  ┌────────────────────────────────────────────────────────┐
+  │  connectivity_checker.py                               │
+  │  Pre-flight S3 + Vault reachability checks             │
+  │         │                                              │
+  │         ▼                                              │
+  │  metadata_reader.py                                    │
+  │  Load column definitions CSV from de-metadata-bucket   │
+  │         │                                              │
+  │         ▼                                              │
+  │  schema_validator.py                                   │
+  │  Enforce expected columns, reject unexpected fields    │
+  │         │                                              │
+  │         ▼                                              │
+  │  type_caster.py                                        │
+  │  Coerce columns to target types per metadata           │
+  │         │                                              │
+  │         ▼                                              │
+  │  pii_processor.py  ──►  vault_client.py (KV v2)       │
+  │  Apply per-column security_level:                      │
+  │    hash    ── HMAC-SHA256 + SALT_2 from Vault          │
+  │    mask    ── Partial redaction  AB****YZ              │
+  │    encrypt ── AES-256 via Vault Transit engine         │
+  └──────────────────────────┬─────────────────────────────┘
+                             │
+                             ▼
+  ┌────────────────────────────────────────────────────────┐
+  │  minio_writer.py                                       │
+  │  Write Parquet (Snappy) ──►  de-data-lake/<app>/       │
+  │                                                        │
+  │  email_notifier.py  ── Success / failure alerts        │
+  └────────────────────────────────────────────────────────┘
+```
+
+### Bronze Layer — Component Detail
+
+```
+  INPUT
+  ┌──────────────────────────┐  ┌──────────────────────────┐
+  │  de-data-lake            │  │  metadata_reader.py      │
+  │  (Parquet files)         │  │  Primary keys, timestamp │
+  └────────────┬─────────────┘  └────────────┬─────────────┘
+               └──────────────┬──────────────┘
+                              │
+  bronze_processor.py         ▼
+  ┌────────────────────────────────────────────────────────┐
+  │  extract_bronze_keys()                                 │
+  │  Detect PK columns + optional timestamp column         │
+  │         │                                              │
+  │         ▼                                              │
+  │  _dedup()                                              │
+  │  ROW_NUMBER OVER (PARTITION BY pk ORDER BY ts DESC)    │
+  │  Keeps latest record per key                           │
+  └──────────────────────────┬─────────────────────────────┘
+                             │
+  bronze_pipeline.py         ▼
+  ┌────────────────────────────────────────────────────────┐
+  │  Full  ──►  Drop Iceberg table  →  _write_bronze()     │
+  │  Delta ──►  DELETE matching PKs  →  INSERT new rows    │
+  │             →  _write_bronze()                         │
+  └──────────────────────────┬─────────────────────────────┘
+                             │
+  OUTPUT                     ▼
+  ┌────────────────────────────────────────────────────────┐
+  │  de-data-bronze/<app>/                                 │
+  │  Iceberg data files (Parquet / Snappy)                 │
+  │                                                        │
+  │  de-iceberg-warehouse-bucket/de_bronze/<app>/          │
+  │  Iceberg metadata (JSON manifests, Avro snapshots)     │
+  └────────────────────────────────────────────────────────┘
+```
+
+### Silver Layer — Component Detail
+
+```
+  UI — Silver Panel
+  ┌────────────────────────────────────────────────────────┐
+  │  Source table selector  ·  Column mapper               │
+  │  Materialization  ·  Preview SQL  ·  Flowchart         │
+  │  AI SQL assist  ·  DWH Gold Load Strategy              │
+  │                                                        │
+  │  [ Transform ]           ──►  /silver/run-transform    │
+  │  [ Run Transform & Load ] ──►  /run-transform-load     │
+  │                                (silver → gold chain)  │
+  └──────────────────────────┬─────────────────────────────┘
+                             │
+  app.py                     ▼
+  ┌────────────────────────────────────────────────────────┐
+  │  _write_silver_dbt_model()                             │
+  │  Generate transformation/models/silver/<model>.sql     │
+  │         │                                              │
+  │         ▼                                              │
+  │  _ensure_silver_sources()                              │
+  │  Create / update models/silver/sources.yml             │
+  │         │                                              │
+  │         ▼  (overwrite strategy only)                   │
+  │  _overwrite_silver_cleanup()                           │
+  │  Drop Iceberg table + clear S3 prefix                  │
+  │         │                                              │
+  │         ▼                                              │
+  │  dbt run --select <model> --target docker              │
+  │  Stream output line-by-line  →  log panel              │
+  │  Regex match  →  Silver pipeline progress dots         │
+  │         │                                              │
+  │         ▼                                              │
+  │  Trino SELECT COUNT(*)  ── Row count verification      │
+  └──────────────────────────┬─────────────────────────────┘
+                             │
+  transformation/            ▼
+  ┌────────────────────────────────────────────────────────┐
+  │  profiles.yml       ── Trino host: trino  port: 8080   │
+  │  macros/            ── get_snapshot_date               │
+  │                        create_silver_table             │
+  │                        append_silver_table             │
+  │                        insert_overwrite_silver_table   │
+  └──────────────────────────┬─────────────────────────────┘
+                             │
+  OUTPUT                     ▼
+  ┌────────────────────────────────────────────────────────┐
+  │  de-data-silver/<table>/                               │
+  │  Iceberg data files (Parquet / Snappy)                 │
+  │                                                        │
+  │  de-iceberg-warehouse-bucket/de_silver/<table>/        │
+  │  Iceberg metadata (JSON manifests, Avro snapshots)     │
+  └────────────────────────────────────────────────────────┘
+```
+
+### Gold Layer — Component Detail
+
+```
+  INPUT
+  ┌──────────────────────────┐  ┌──────────────────────────┐
+  │  de-data-silver          │  │  Vault: secret/oracle/adw│
+  │  Iceberg table via Trino │  │  user · password · DSN   │
+  └────────────┬─────────────┘  │  wallet ZIP (base64)     │
+               │                └────────────┬─────────────┘
+               └──────────────┬──────────────┘
+                              │
+  oracle_loader.py            ▼
+  ┌────────────────────────────────────────────────────────┐
+  │  _read_oracle_creds()                                  │
+  │  Fetch credentials from Vault KV v2                    │
+  │         │                                              │
+  │         ▼                                              │
+  │  _setup_wallet()                                       │
+  │  Base64 decode + unzip wallet to temp directory        │
+  │         │                                              │
+  │         ▼                                              │
+  │  _trino_type_to_oracle()                               │
+  │  Map Trino column types  →  Oracle column types        │
+  │         │                                              │
+  │         ▼                                              │
+  │  _ensure_table()                                       │
+  │  CREATE TABLE IF NOT EXISTS in Oracle ADW              │
+  │         │                                              │
+  │         ├── append          ──►  INSERT 5 000 rows     │
+  │         ├── truncate         ──►  TRUNCATE + INSERT    │
+  │         └── delete_and_insert ──►  DELETE date+INSERT  │
+  └──────────────────────────┬─────────────────────────────┘
+                             │
+  OUTPUT                     ▼
+  ┌────────────────────────────────────────────────────────┐
+  │  Oracle ADW  target table                              │
+  │  Auto-created if not exists  ·  Batched (5 000 rows)   │
+  └────────────────────────────────────────────────────────┘
+```
+
+---
+
+## Services & Infrastructure
+
+### Docker Services
+
+| Service | Container | Image | Port(s) | Purpose |
+|---|---|---|---|---|
+| MinIO | `minio` | `minio/minio:latest` | `9000` (S3 API), `9001` (Console) | S3-compatible object store for all data lake buckets |
+| MinIO Init | `minio-init` | `minio/mc:latest` | — | One-shot bucket provisioner (8 buckets) |
+| HashiCorp Vault | `vault` | `hashicorp/vault:latest` | `8200` | Secrets store — PII keys, Oracle ADW credentials |
+| Vault Init | `vault-init` | custom | — | Daemon: unseal + seed secrets, monitors for re-seal |
+| PostgreSQL | `postgres-meta` | `postgres:15` | — | Hive Metastore backend database |
+| Hive Metastore | `hive-metastore` | custom (`Dockerfile.hms`) | `9083` | Iceberg catalog registry (Thrift protocol) |
+| Trino | `trino` | `trinodb/trino:482` | `8081` → `8080` | Distributed SQL engine for DBT silver transforms |
+| Flask UI | `de-ui` | custom (`Dockerfile`) | `5001` → `5000` | Web UI — pipeline control, scheduling, monitoring |
+| Cloudflare Tunnel | `cloudflared` | `cloudflare/cloudflared:latest` | — | HTTPS reverse proxy to `atestingdomain.info` |
+| Pipeline Runner | `de-pipeline` | custom (`Dockerfile`) | — | On-demand Spark runner for ingestion and bronze |
+
+### MinIO S3 Buckets
+
+| Bucket | Layer | Contents |
 |---|---|---|
-| 1 | Read `minio.de_lake.<app>` filtered by `ingest_date = run_date` | Read `minio.de_lake.<app>` filtered by `ingest_date = run_date` |
-| 2 | Dedup by primary key + timestamp/date column → keep the latest record per key | Also read existing `minio.de_bronze.<app>` where `snapshot_date < run_date` |
-| 3 | Set `snapshot_date = run_date` on all result rows | Dedup the lake batch by primary key + timestamp/date column |
-| 4 | Write result to Bronze Iceberg table | Union new batch (`_priority=0`) with prev snapshot (`_priority=1`); dedup by primary_key — new wins on conflict |
-| 5 | — | Write result as new partition `snapshot_date = run_date` |
-| 6 | Writes **Iceberg table** `minio.de_bronze.<app>` — data path `s3a://de-data-bronze/<app>/`, meta path `s3a://de-iceberg-warehouse-bucket/de_bronze/<app>/`, partitioned by `days(snapshot_date)` | ← same for both modes |
-| 7 | Uploads run log → `s3a://de-data-migration-logs/bronze/<app>/<date>/` | ← same for both modes |
+| `de-data-lake` | Lake | Raw Parquet files from ingestion (after PII processing) |
+| `de-source-data-bucket` | Ingestion | Source CSV/JSON/Parquet uploaded by the user |
+| `de-data-bronze` | Bronze | Iceberg data files (Parquet/Snappy) |
+| `de-iceberg-warehouse-bucket` | Bronze + Silver | Iceberg metadata (JSON manifests, Avro snapshots) |
+| `de-data-silver` | Silver | DBT-produced Iceberg data files |
+| `de-data-transformation` | Silver | DBT compilation artefacts |
+| `de-metadata-bucket` | All | Metadata CSV sheets (column definitions per app) |
+| `de-data-migration-logs` | All | Pipeline execution logs |
+
+### Cloudflare Tunnel Routes
+
+| Domain | Backend Service | Port |
+|---|---|---|
+| `atestingdomain.info` | Flask UI | 5000 |
+| `minio.atestingdomain.info` | MinIO Console | 9001 |
+| `vault.atestingdomain.info` | HashiCorp Vault UI | 8200 |
 
 ---
 
-### Low-Level Architecture
-
-#### Docker Services
-
-| Service | Role | Internal Port | Public URL |
-|---|---|---|---|
-| **minio** | S3-compatible object store — raw data, Iceberg tables, logs | 9000 (API), 9001 (Console) | `https://s3.atestingdomain.info` / `https://minio.atestingdomain.info` |
-| **vault** | Secrets — PII keys, pipeline tokens, Supabase password | 8200 | `https://vault.atestingdomain.info` |
-| **ui** | Flask web UI — submit jobs, stream logs, user management | 5000 (→ host 5001) | `https://app.atestingdomain.info` |
-| **cloudflared** | Outbound Cloudflare Tunnel — routes all public subdomains | — | — |
-| **pipeline** | Spark ETL runner — spawned on-demand, auto-removed | — | — |
-| **minio-init** | One-shot bucket provisioner (runs once on first up) | — | — |
-| **vault-init** | One-shot Vault bootstrapper — unseals + seeds secrets | — | — |
-| **awscli** | Debug helper — AWS CLI pre-wired to MinIO endpoint | — | — |
-
-#### Docker Network Topology
-
-```
-┌────────────────────────────────────────────────────────────────────────────────┐
-│  Docker Host                                                                   │
-│                                                                                │
-│  ┌──────────────────────────── de-net (bridge) ──────────────────────────────┐ │
-│  │                                                                           │ │
-│  │  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐       │ │
-│  │  │    minio    │  │    vault    │  │    de-ui    │  │ cloudflared │       │ │
-│  │  │  :9000 API  │  │    :8200    │  │    :5000    │  │  (tunnel)   │       │ │
-│  │  │:9001 console│  │   Transit   │  │  Flask app  │  │  outbound   │       │ │
-│  │  │             │  │   KV v2     │  │  Auth/CSRF  │  │  HTTP/2     │       │ │
-│  │  └──────┬──────┘  └──────┬──────┘  └──────┬──────┘  └──────┬──────┘       │ │
-│  │         │                │                │                │              │ │
-│  │         │                │                 │               │              │ │
-│  │         │      vault_secrets volume        │     ┌──────┘─────────────┐   │ │         
-│  │         │      (pipeline_token,            │     │ routes:            │   │ │
-│  │         │       supabase_pwd_ciphertext)   │     │ app.   → de-ui     │   │ │
-│  │         │                │                 │     │ s3.    → minio:9000│   │ │
-│  │         │                ▼                 │     │ minio. → :9001     │   │ │
-│  │         │    ┌───────────────────────┐     │     │ vault. → vault     │   │ │
-│  │         └───▶│  pipeline (ephemeral) │◀────┘     └────────────────────┘   │ │
-│  │              │  spawned via Docker   │                                    │ │
-│  │              │  sock; Spark 4.x      │                                    │ │
-│  │              │  local[*], auto-rm    │                                    │ │
-│  │              └───────────────────────┘                                    │ │
-│  └───────────────────────────────────────────────────────────────────────────┘ │
-│                                                                                │
-│  /var/run/docker.sock  (de-ui mounts host socket to spawn pipeline)            │
-└────────────────────────────────────────────────────────────────────────────────┘
-                                    │
-                   Cloudflare Tunnel (HTTPS, HTTP/2)
-                                    │
-                    ┌───────────────┴───────────────┐
-                    │      atestingdomain.info       │
-                    │  app.*  minio.*  s3.*  vault.* │
-                    └───────────────────────────────┘
-```
-
-#### Authentication Architecture
-
-```
-  Browser ──HTTPS──▶ Cloudflare ──Tunnel──▶ cloudflared ──▶ de-ui:5000
-                                                               │
-                                                    Flask-Login + CSRF
-                                                               │
-                                         ┌─────────────────────┘
-                                         │
-                              /login  (rate-limited: 5/min per IP)
-                                │
-                          argon2id verify
-                                │
-                      ┌─────────┴──────────┐
-                      │ Supabase           │
-                      │ public.app_users   │
-                      │  - id, username    │
-                      │  - password_hash   │
-                      │  - role (root/user)│
-                      │  - failed_attempts │
-                      │  - locked_until    │
-                      └────────────────────┘
-                                │
-                    locked after 5 failures (15 min)
-                    HaveIBeenPwned check on create
-                    root user: only role that can add users
-```
-
-#### Secret Resolution Chain
-
-```
-  vault-init (one-shot bootstrap)
-  ├── Initialises + unseals Vault; saves unseal key to vault_data volume
-  ├── Enables Transit engine
-  │   ├── Creates pii-encrypt key  (exportable  — AES-256-GCM)
-  │   └── Creates supabase-pwd key (non-exportable — encrypt only)
-  ├── Enables KV v2 at secret/
-  │   └── Writes SALT_2 from .env
-  ├── Encrypts SUPABASE_DB_PASSWORD_PLAIN → ciphertext
-  │   └── Writes ciphertext to vault_secrets:/vault/secrets/supabase_db_password_ciphertext
-  └── Creates scoped pipeline token (24h, renewable)
-      └── Writes token to vault_secrets:/vault/secrets/pipeline_token
-
-  seed_root_user.py (runs in ui-entrypoint.sh at every UI startup)
-  ├── Calls init_schema() — creates public.app_users table if missing
-  ├── Checks for existing root user — skips if found
-  └── Creates root user from ROOT_PASSWORD env var (auto-generates if blank)
-
-  ui/db.py (auth database connection)
-  ├── AUTH_DATABASE_URL env var (PostgreSQL pooler URL — IPv4 capable)
-  │   or falls back to parsing SUPABASE_JDBC_URL
-  ├── Decrypts Supabase password via Vault Transit
-  └── psycopg2 connection with RealDictCursor
-
-  At pipeline startup (entrypoint.sh)
-  ├── VAULT_TOKEN: .env value wins; vault_secrets file is fallback
-  ├── SUPABASE_DB_PASSWORD: always loaded from vault_secrets ciphertext file
-  └── MINIO credentials: substituted into spark-defaults.conf via sed
-
-  At runtime (Spark job)
-  ├── vault_client.py  ──▶  Vault Transit export  ──▶  pii-encrypt AES key
-  ├── vault_client.py  ──▶  Vault KV read         ──▶  SALT_2
-  └── vault_client.py  ──▶  Vault Transit decrypt  ──▶  Supabase plaintext password
-```
-
-#### Spark Execution Flow — Lake Pipeline
-
-```
-  pipeline.py (spark-submit entry point)
-  │
-  ├── 1. Parse CLI args (argparse)
-  ├── 2. Load env config  (DE_Ingestion_properties.py)
-  ├── 3. Build SparkSession  (spark_session.py)
-  │       └── Config from conf/spark-defaults.conf
-  │           ├── Iceberg extensions + hadoop catalog
-  │           ├── S3A credentials + endpoint (injected by entrypoint.sh)
-  │           └── Iceberg catalog: minio → s3a://de-iceberg-warehouse-bucket/
-  │
-  ├── 4. Read metadata sheet CSV  (metadata_reader.py)
-  │       └── s3a://de-metadata-bucket/<key>
-  │
-  ├── 5. Read source data
-  │       ├── S3 path  → SparkReader.parquet / csv / json  (s3a://)
-  │       └── Database → SparkReader.jdbc  (Supabase / PostgreSQL)
-  │
-  ├── 6. Schema validation → 7. Type casting → 8. PII processing
-  │       ├── hash    → HMAC-SHA256 with SALT_KEY
-  │       ├── mask    → replace with "****"
-  │       └── encrypt → AES-256-GCM with key from Vault Transit export
-  │
-  ├── 9. Write Iceberg table  (minio_writer.py)
-  │       ├── Table:     minio.de_lake.<app_name>
-  │       ├── Data path: s3a://de-data-lake/<app_name>/                       (write.data.path)
-  │       ├── Meta path: s3a://de-iceberg-warehouse-bucket/de_lake/<app_name>/  (write.meta.path)
-  │       ├── Partition: days(ingest_date)
-  │       └── Modes: overwrite | append | replace
-  │
-  ├── 10. Upload log  → s3a://de-data-migration-logs/lake/<app>/<date>/
-  └── 11. Email notification via Brevo
-```
-
-#### Spark Execution Flow — Bronze Pipeline
-
-```
-  bronze_pipeline.py (spark-submit entry point)
-  │
-  ├── 1. Parse CLI args (--application-name, --run-date, --run-type)
-  ├── 2. Build SparkSession  (same spark-defaults.conf)
-  ├── 3. Read metadata sheet → extract primary_key and is_timestamp columns
-  │
-  ├── 4. run_full OR run_delta  (bronze_processor.py)
-  │
-  │   run_full (--run-type full)
-  │   ├── Read:  minio.de_lake.<app> WHERE ingest_date = run_date
-  │   ├── Dedup: Window(partitionBy=primary_keys, orderBy=timestamp desc) → row_number=1
-  │   │          (or dropDuplicates if no timestamp column)
-  │   ├── Add:   snapshot_date = run_date
-  │   └── Write: createOrReplace (first run) or overwritePartitions (subsequent)
-  │
-  │   run_delta (--run-type delta)
-  │   ├── Read:  minio.de_lake.<app> WHERE ingest_date = run_date  → dedup
-  │   ├── If bronze table is new → fall back to full write
-  │   └── Else →
-  │       ├── Read bronze WHERE snapshot_date = MAX(snapshot_date < run_date)
-  │       ├── Union: df_new(_priority=0) + df_prev(_priority=1)
-  │       ├── Window.partitionBy(*PKs).orderBy(_priority) → keep row_number=1
-  │       └── Write new partition: snapshot_date = run_date
-  │
-  └── 5. Write Iceberg table  (_write_bronze)
-          ├── Table:     minio.de_bronze.<app_name>
-          ├── Data path: s3a://de-data-bronze/<app_name>/                         (write.data.path)
-          ├── Meta path: s3a://de-iceberg-warehouse-bucket/de_bronze/<app_name>/ (write.meta.path)
-          └── Partition: days(snapshot_date)
-```
-
-#### MinIO Bucket Layout
-
-```
-  MinIO
-  │
-  ├── de-source-data-bucket/              ← raw input files (S3 source type)
-  │   └── <folder>/<file>
-  │
-  ├── de-metadata-bucket/                 ← metadata CSV sheets
-  │   └── <dataset>_metadata.csv
-  │
-  ├── de-data-lake/                       ← LAKE LAYER: Iceberg Parquet data files
-  │   └── <app_name>/                     │  (write.data.path)
-  │       └── data/                       │
-  │           └── ingest_date=YYYY-MM-DD/ │  daily partitions
-  │               └── *.parquet           │
-  │
-  ├── de-data-bronze/                     ← BRONZE LAYER: deduplicated Parquet data
-  │   └── <app_name>/                     │  (write.data.path)
-  │       └── data/                       │
-  │           └── snapshot_date_day=*/    │  daily partitions
-  │               └── *.parquet           │
-  │
-  ├── de-iceberg-warehouse-bucket/        ← Iceberg metadata (manifests + snapshots)
-  │   ├── de_lake/                        │  Lake meta (write.meta.path)
-  │   │   └── <app_name>/
-  │   │       └── metadata/               │  *.avro, *.json, snap-*.avro
-  │   └── de_bronze/                      │  Bronze meta (write.meta.path)
-  │       └── <app_name>/
-  │           └── metadata/               │  *.avro, *.json, snap-*.avro
-  │
-  └── de-data-migration-logs/             ← pipeline run logs
-      ├── lake/<app>/<date>/<app>_<date>_<spark-id>.log
-      └── bronze/<app>/<date>/bronze_<app>_<date>_<spark-id>.log
-```
-
-#### Iceberg Data Path vs Meta Path
-
-Iceberg splits each table into two storage locations, set via `DataFrameWriter.tableProperty`:
-
-| Property | Purpose | Lake value | Bronze value |
-|---|---|---|---|
-| `write.data.path` | Parquet data files | `s3a://de-data-lake/<app>/` | `s3a://de-data-bronze/<app>/` |
-| `write.meta.path` | Metadata files (manifests, snapshots, schema) | `s3a://de-iceberg-warehouse-bucket/de_lake/<app>/` | `s3a://de-iceberg-warehouse-bucket/de_bronze/<app>/` |
-
-Keeping data and metadata in separate buckets means:
-- **Data bucket** can be lifecycle-managed or swapped independently of the catalog metadata
-- **Warehouse bucket** holds only lightweight JSON/Avro metadata — easy to back up and inspect
-- Both lake and bronze metadata coexist in `de-iceberg-warehouse-bucket` under different prefixes, so a single Iceberg catalog (`minio`) covers all layers
-
----
-
-## Domain Setup (Cloudflare Tunnel)
-
-The stack runs locally in Docker and is exposed publicly via a **Cloudflare Tunnel** — no port forwarding or static IP required. `cloudflared` connects outbound using HTTP/2 over TLS, which works reliably behind Docker Desktop's NAT.
-
-| URL | Routes to |
-|---|---|
-| `https://app.atestingdomain.info` | Flask Web UI (`de-ui:5000`) |
-| `https://minio.atestingdomain.info` | MinIO Console (`minio:9001`) |
-| `https://s3.atestingdomain.info` | MinIO S3 API (`minio:9000`) |
-| `https://vault.atestingdomain.info` | Vault UI + API (`vault:8200`) |
-
-### One-time tunnel setup
-
-1. Log in to [Cloudflare Zero Trust](https://one.dash.cloudflare.com) → **Networks → Tunnels**
-2. Click **Create a tunnel** → **Cloudflared** → name it `de-metadata-framework`
-3. Copy the **tunnel token** (long string starting with `eyJ...`)
-4. Add to your `.env`:
-   ```env
-   CLOUDFLARE_TUNNEL_TOKEN=eyJ...your_token_here...
-   ```
-5. In the tunnel's **Public Hostnames** tab, add four entries:
-
-   | Subdomain | Domain | Service URL |
-   |---|---|---|
-   | `app` | `atestingdomain.info` | `http://de-ui:5000` |
-   | `minio` | `atestingdomain.info` | `http://minio:9001` |
-   | `s3` | `atestingdomain.info` | `http://minio:9000` |
-   | `vault` | `atestingdomain.info` | `http://vault:8200` |
-
-   Cloudflare automatically creates the CNAME DNS records — nothing else to configure.
-
-6. Start the full stack:
-   ```bash
-   docker compose up -d
-   ```
-
-> **Note:** The `cloudflared` service uses `--protocol http2`. Do not change it to `quic` — QUIC over Docker Desktop's NAT causes silent proxy failures.
-
----
-
-## Prerequisites
-
-- **Docker Desktop** (with BuildKit enabled — default on Desktop)
-- **Python 3.11** and a virtual environment (for local development only)
-- **Java 17** (for running Spark locally outside Docker)
-
----
-
-## Project Structure
+## Folder Structure
 
 ```
 de-metadata-framework/
-├── Dockerfile                         # Single image: pipeline + UI + auth
-├── docker-compose.yml                 # Full service orchestration
+├── docker-compose.yml              # Full service graph
+├── Dockerfile                      # UI + pipeline image
 ├── docker/
-│   ├── entrypoint.sh                 # Pipeline container entry point
-│   ├── ui-entrypoint.sh              # UI container entry point (seeds root user)
-│   ├── vault_init.py                 # One-shot Vault bootstrap
-│   ├── seed_root_user.py             # Creates root user on first UI start
-│   ├── pip_install.sh                # Smart pip installer (skips cached versions)
-│   └── awscli-entrypoint.sh          # AWS CLI entrypoint pre-wired to MinIO credentials
+│   ├── Dockerfile.hms              # Hive Metastore image
+│   ├── entrypoint.sh               # Pipeline entrypoint (spark-submit)
+│   ├── ui-entrypoint.sh            # Flask UI entrypoint (DB migration + gunicorn)
+│   ├── vault_init.py               # Vault unseal + secret seeder daemon
+│   ├── seed_root_user.py           # Creates root user in Supabase on first boot
+│   ├── spark_query_server.py       # Spark SQL query microservice
+│   └── sql_runner.py               # SQL execution helper
+│
 ├── conf/
-│   ├── spark-defaults.conf           # Spark + Iceberg + S3A config (gitignored)
-│   └── log4j2.properties             # Spark logging config
+│   ├── spark-defaults.conf         # ALL Spark / S3A / Iceberg config (single source of truth)
+│   └── log4j2.properties           # Spark logging config
+│
 ├── ingestion/
-│   ├── main/pipeline.py              # ETL orchestrator (spark-submit entry point)
-│   ├── env/DE_Ingestion_properties.py # All config loaded from environment
-│   ├── pyfiles/                      # Core modules
-│   │   ├── spark_session.py          # SparkSession builder
-│   │   ├── pii_processor.py          # Hash / mask / encrypt columns
-│   │   ├── vault_client.py           # Vault Transit + KV client
-│   │   ├── logger.py                 # Log to MinIO
-│   │   └── notifier.py               # Brevo email notifications
-│   ├── source/                       # S3 and Supabase/JDBC readers
-│   └── sink/                         # Iceberg/MinIO writer
+│   ├── main/pipeline.py            # Spark pipeline entry point
+│   ├── env/DE_Ingestion_properties.py  # Bucket names, catalog, env constants
+│   ├── pyfiles/
+│   │   ├── spark_session.py        # Spark session builder (reads spark-defaults.conf)
+│   │   ├── pii_processor.py        # PII actions: hash, mask, encrypt
+│   │   ├── vault_client.py         # Vault KV v2 + Transit engine client
+│   │   ├── metadata_reader.py      # Load metadata CSV from MinIO
+│   │   ├── schema_validator.py     # Enforce expected schema
+│   │   ├── type_caster.py          # Column type coercion
+│   │   ├── connectivity_checker.py # Pre-flight S3 / Vault checks
+│   │   ├── iceberg_repair.py       # Iceberg table repair utilities
+│   │   ├── args_parser.py          # CLI argument parser
+│   │   ├── logger.py               # Structured logger
+│   │   └── email_notifier.py       # Success / failure email alerts
+│   ├── source/
+│   │   ├── s3_reader.py            # Read CSV/JSON/Parquet from MinIO
+│   │   └── supabase_reader.py      # Read tables from Supabase (PostgreSQL)
+│   └── sink/
+│       └── minio_writer.py         # Write Parquet to de-data-lake
+│
 ├── bronze_layer/
-│   ├── bronze_pipeline.py            # Bronze spark-submit entry point
-│   └── bronze_processor.py           # Dedup logic: extract_bronze_keys, run_full, run_delta
+│   ├── bronze_processor.py         # PK extraction, dedup, Iceberg writer
+│   └── bronze_pipeline.py          # Full vs delta strategy orchestration
+│
+├── transformation/                 # DBT project (live-mounted into de-ui container)
+│   ├── dbt_project.yml             # DBT project config
+│   ├── profiles.yml                # Trino adapter config (env-driven host/port)
+│   ├── packages.yml                # dbt-utils dependency
+│   ├── models/
+│   │   ├── staging/                # Views over bronze tables (example models)
+│   │   ├── silver/                 # Auto-generated silver models (created by UI)
+│   │   └── marts/                  # Aggregate / business layer models
+│   └── macros/
+│       ├── get_snapshot_date.sql   # Returns current run date for filtering
+│       ├── generate_schema_name.sql # Schema routing macro
+│       ├── create_silver_table.sql  # CREATE TABLE IF NOT EXISTS helper
+│       ├── append_silver_table.sql  # INSERT INTO helper
+│       └── insert_overwrite_silver_table.sql  # DROP + recreate helper
+│
+├── oracle_layer/
+│   └── oracle_loader.py            # Trino → Oracle ADW loader (3 strategies)
+│
+├── trino/
+│   └── etc/
+│       ├── config.properties       # Trino coordinator config
+│       ├── jvm.config              # JVM heap settings
+│       ├── node.properties         # Node ID and data directory
+│       └── catalog/
+│           └── minio.properties    # Iceberg connector + native S3 config
+│
+├── hive-conf/
+│   ├── hive-site.xml               # Metastore DB connection + S3 endpoint
+│   └── core-site.xml               # Hadoop S3A credentials
+│
 ├── ui/
-│   ├── app.py                        # Flask application + pipeline routes
-│   ├── auth.py                       # Login / logout / user management routes
-│   ├── models.py                     # User model (Argon2id, lockout, HIBP check)
-│   ├── db.py                         # Supabase connection + schema init
-│   ├── extensions.py                 # Shared Flask extensions (CSRF, Login, Limiter)
+│   ├── app.py                      # Flask application (all routes + APScheduler)
+│   ├── auth.py                     # Login / logout / register blueprints
+│   ├── db.py                       # Supabase PostgreSQL connection pool
+│   ├── models.py                   # Flask-Login User model
+│   ├── extensions.py               # Flask extension singletons
 │   └── templates/
-│       ├── index.html                # Main pipeline submission UI
-│       ├── login.html                # Login page
-│       └── users.html                # User management (root only)
+│       ├── index.html              # Main SPA (all panels, JS, streaming log)
+│       ├── login.html              # Login page
+│       └── users.html              # User management page
+│
 ├── metadata/
-│   └── metadata_sheet_example.csv    # Example metadata sheet
-├── requirements.txt                  # Lightweight deps (boto3, flask, auth libs…)
-├── requirements-heavy.txt            # Large deps (pyspark, pyarrow, psycopg2…)
-└── scripts/                          # Local helper scripts
+│   └── metadata_sheet_example.csv  # Example metadata definition template
+│
+├── tests/
+│   ├── unit/                       # Unit tests (preview SQL, silver routes, scheduler)
+│   └── regression/                 # Regression tests (Iceberg paths, HMS schema)
+│
+├── scripts/
+│   ├── init_minio_bucket.sh        # Manual bucket setup script
+│   └── start_minio.sh              # Local MinIO start helper
+│
+├── requirements.txt                # Core Python dependencies
+├── requirements-heavy.txt          # Spark / PySpark dependencies
+├── requirements-dev.txt            # Dev/test dependencies
+└── config.py                       # Top-level config constants
 ```
 
 ---
 
-## First-Time Setup
+## Layer Functionality
 
-### 1. Clone the repository
+### 1. Ingestion Layer (Lake)
+
+The ingestion layer reads raw data from external sources, applies metadata-driven processing, masks/hashes PII columns, and writes clean Parquet files to the data lake.
+
+**Entry point:** `ingestion/main/pipeline.py` via `docker-compose run pipeline`
+
+**Sources supported:**
+- **S3 / MinIO** — CSV, JSON, or Parquet files from `de-source-data-bucket`
+- **Supabase (PostgreSQL)** — Direct table reads via `psycopg2`
+
+**Processing steps:**
+1. **Connectivity check** — Validates MinIO and Vault reachability before processing begins
+2. **Metadata load** — Reads column definitions CSV from `de-metadata-bucket` (column name, data type, security level, primary key flags)
+3. **Schema validation** — Enforces expected columns and rejects unexpected fields
+4. **Type casting** — Coerces columns to target types per metadata definitions
+5. **PII processing** — Three security levels driven by the `security_level` column in the metadata sheet:
+   - `hash` — HMAC-SHA256 with SALT_KEY + SALT_2 (fetched from Vault KV)
+   - `pii` / `mask` — Partial redaction: first 2 chars + `****` + last 2 chars
+   - `encrypt` — AES-256 encryption via Vault Transit engine
+6. **Write to lake** — Parquet with Snappy compression written to `s3a://de-data-lake/<app_name>/`
+
+**Naming convention:** Application names are prefixed `Ingestion_` automatically by the UI on field blur.
+
+---
+
+### 2. Bronze Layer
+
+The bronze layer promotes lake Parquet files into structured Iceberg tables, supporting two load strategies.
+
+**Entry point:** `bronze_layer/bronze_pipeline.py` via `/run-bronze` Flask route
+
+**Strategies:**
+
+| Strategy | Behaviour |
+|---|---|
+| **Full Load** | Drops existing Iceberg table, writes entire lake dataset fresh |
+| **Delta Load** | Deduplicates incoming data by primary keys (optionally ordered by timestamp column), then merges: DELETE matching PKs → INSERT new rows |
+
+**Deduplication logic (`bronze_processor.py`):**
+- With timestamp column: `ROW_NUMBER() OVER (PARTITION BY pk ORDER BY ts DESC)` — keeps latest record per key
+- Without timestamp: `dropDuplicates(primary_keys)`
+
+**Storage layout:**
+- Data files → `s3a://de-data-bronze/<app_name>/`
+- Iceberg metadata → `s3a://de-iceberg-warehouse-bucket/de_bronze/<app_name>/`
+
+---
+
+### 3. Silver Layer (DBT + Trino)
+
+The silver layer transforms bronze Iceberg tables using DBT models executed against Trino. The UI builds the DBT SQL dynamically from a visual column mapper and supports two run modes.
+
+**Run modes:**
+
+| Button | Endpoint | Behaviour |
+|---|---|---|
+| **Transform** | `POST /silver/run-transform` | Runs silver DBT transform only; streams logs to the floating log panel and advances the Silver pipeline progress steps |
+| **Run Transform & Load** | `POST /run-transform-load` | Two-phase async chain: silver first, then Gold Oracle ADW load if silver succeeds |
+
+**Workflow:**
+1. **UI configuration** — User selects source bronze table(s), maps columns (with optional SQL expressions), sets materialization strategy
+2. **DBT model generation** (`_write_silver_dbt_model()`) — Generates a `.sql` file in `transformation/models/silver/` with Jinja2 + DBT syntax and Iceberg table properties
+3. **Sources manifest** (`_ensure_silver_sources()`) — Auto-creates/updates `sources.yml` to register all referenced bronze tables
+4. **Overwrite cleanup** (`_overwrite_silver_cleanup()`) — For overwrite strategy: drops Iceberg table and clears S3 prefix before run
+5. **DBT execution** — Runs `dbt run --select <model_name> --target docker` inside the container; output streamed line-by-line to the UI log panel
+6. **Verification** — Queries `SELECT COUNT(*)` via Trino to confirm row count
+
+**Streaming log messages and progress step mapping:**
+
+The backend emits structured `[silver]` prefixed log lines. The frontend `processTLLine()` function regex-matches these to advance progress step dots:
+
+| Log line | Progress step |
+|---|---|
+| `[silver] Ensuring MinIO bucket de-data-silver exists...` | `bucket` — running |
+| `[silver] Bucket 'de-data-silver' OK.` | `bucket` — done |
+| `[silver] Writing DBT model file...` | `schema` — running |
+| `[silver] Materialization: ...` / `[silver] Source tables: ...` | `schema` — running |
+| `[silver] Submitting DBT job to Trino...` | `execute` — running |
+| `[silver] 1 of 1 START ...` / `[silver] Concurrency: ...` | `data` — running |
+| `[silver] DBT run completed successfully.` | `data` — done |
+| `[silver] Verifying Iceberg table — querying row count...` | `data` |
+| `[silver] Row count verified: N rows in de_silver.<table>.` | `data` |
+| `--- Silver Exit 0 ---` | `complete` — done |
+| `--- Silver Exit 1 ---` / `[silver] ERROR` | `complete` — fail |
+
+**Oracle target table auto-fill:**
+
+When the user sets the Silver Target Table field, `_tlSyncGoldFields()` fires automatically and:
+- Copies the value into the Gold panel's **Silver Table** field
+- Derives the Oracle target table as `target_table.toUpperCase()` and writes it to the Gold panel's **Oracle Table** field
+
+This means the Gold layer is pre-populated without manual entry whenever a silver target table is named.
+
+**Materialization options:**
+
+| Strategy | DBT materialization | Behaviour |
+|---|---|---|
+| Append | `incremental` (append) | Adds new rows without removing existing |
+| Overwrite | Custom macro | Drops and recreates table on each run |
+| Incremental | `incremental` (merge) | Upsert on primary keys |
+
+**Storage layout:**
+- Data files → `s3://de-data-silver/<table_name>/`
+- Iceberg metadata → `s3://de-iceberg-warehouse-bucket/de_silver/<table_name>/`
+
+**AI features (via OpenAI):**
+- `/silver/convert-logic` — Converts natural-language column descriptions to SQL expressions
+- `/lake-ask` — Natural-language SQL query generation against lake data
+
+---
+
+### 4. Gold Layer (Oracle ADW)
+
+The gold layer loads silver Iceberg data into Oracle Autonomous Data Warehouse using three configurable strategies. It is triggered via the **"Run DWH Gold Layer"** button in the Gold panel, or automatically after a successful silver run when using "Run Transform & Load".
+
+**Entry points:**
+
+| Trigger | Endpoint | Description |
+|---|---|---|
+| Gold panel "Run DWH Gold Layer" button | `POST /run-oracle` | Standalone Oracle load with streaming log output |
+| Transform & Load Phase 2 (auto) | `POST /run-transform-load` | Chained after silver success; logs prefixed `[gold]` |
+| Scheduled silver job with `oracle_table` | Internal scheduler | Triggered automatically by `_trigger_scheduled_job()` |
+
+**Oracle ADW authentication:**
+- Credentials stored in Vault at `secret/data/oracle/adw` (user, password, DSN, wallet password, wallet ZIP as base64)
+- Wallet ZIP is base64-decoded and extracted to a temp directory at runtime; `oracledb` connects in thin mode with the wallet path
+
+**Load strategies:**
+
+| Strategy | SQL Executed |
+|---|---|
+| `append` | Batched `INSERT INTO target` from Silver rows (5,000 rows per batch, configurable via `ORACLE_BATCH_SIZE`) |
+| `truncate` | `TRUNCATE TABLE target` followed by batched INSERT |
+| `delete_and_insert` | `DELETE FROM target WHERE date_col = run_date` followed by batched INSERT |
+
+**Gold pipeline progress step tracking:**
+
+The Gold progress card advances step dots by matching `[gold]` prefixed log lines:
+
+| Log line pattern | Progress step |
+|---|---|
+| `[gold] Launching` / `[gold] Starting Oracle load` | `connect` — running |
+| `[gold] Table ensured` | `table` — done |
+| `[gold] Inserted rows` | `load` — running |
+| `[gold] Load complete` | `load` — done |
+| `--- Oracle Load Exit 0 ---` | `complete` — done |
+| `--- Oracle Load Exit 1 ---` / `[gold] ERROR` | `complete` — fail |
+
+**Type mapping (`_trino_type_to_oracle()`):**
+
+| Trino Type | Oracle Type |
+|---|---|
+| `varchar(N)` | `VARCHAR2(N)` |
+| `bigint`, `integer` | `NUMBER(19)` |
+| `decimal(p,s)` | `NUMBER(p,s)` |
+| `double`, `float` | `BINARY_DOUBLE` |
+| `boolean` | `NUMBER(1)` |
+| `timestamp` | `TIMESTAMP` |
+
+**Auto-provisioning:** `_ensure_table()` creates the Oracle target table with correct column types if it does not already exist, derived from `DESCRIBE minio.de_silver.<table>` via Trino.
+
+---
+
+## Web UI Features
+
+The UI is a single-page application (Flask-rendered Jinja2 template with vanilla JavaScript) featuring real-time streaming log panels and visual pipeline progress indicators.
+
+### Panels
+
+| Panel | Description |
+|---|---|
+| **Ingestion** | Configure and trigger lake ingestion (source, app name, metadata, schedule) |
+| **Bronze** | Trigger bronze promotion with full or delta strategy selection |
+| **Silver Transform** | Visual column mapper, SQL preview, flowchart diagram, DBT run controls |
+| **Gold DWH** | Oracle ADW load — select silver table, load strategy, date column |
+| **Transform & Load** | Chained Silver → Gold pipeline with dual progress tracking |
+| **Scheduled Jobs** | View, create, and delete scheduled ingestion and silver jobs |
+| **Log History** | Browse and download historical pipeline logs from MinIO |
+| **Connectivity** | Real-time health check panel for all services |
+| **Lake SQL** | Ad-hoc SQL query runner against lake Parquet via Spark |
+
+### Real-Time Streaming
+
+All pipeline runs stream logs line-by-line via HTTP chunked transfer encoding (`stream_with_context`). The floating log panel appends each line as it arrives with no polling. Success or failure is determined by detecting sentinel exit lines in the stream (`--- Silver Exit 0 ---`, `--- Oracle Load Exit 0 ---`) rather than HTTP status codes, since streaming responses always return HTTP 200.
+
+### Transform & Load — Two-Phase Async Flow
+
+The "Run Transform & Load" button executes a two-phase pipeline entirely in the browser using `async/await`:
+
+```
+Phase 1 — Silver
+  POST /silver/run-transform
+  Stream logs → processTLLine() → advance Silver progress dots
+  Detect "--- Silver Exit 0 ---" → silver success
+  On failure: mark silver complete dot red, abort
+
+  ↓ (silver succeeded)
+
+  Flush log panel, relabel title to "Gold Load Logs"
+  Switch progress card tab to Gold
+  Set Silver nav dot → done, Gold nav dot → running
+
+Phase 2 — Gold
+  POST /run-oracle
+  Raw container logs are prefixed [gold] in the browser if not already prefixed
+  Stream logs → processTLLine() → advance Gold progress dots
+  Detect "--- Oracle Load Exit 0 ---" → gold success
+  Set Gold nav dot → done / fail
+```
+
+This architecture means the two phases share the same log panel with a clean flush between them, and the pipeline progress card always shows the active phase.
+
+### Pipeline Progress Card
+
+The **Transform & Load** panel includes a visual progress step card with two tabs:
+
+**Silver steps:** `bucket` → `schema` → `execute` → `data` → `complete`
+
+**Gold steps:** `connect` → `table` → `load` → `complete`
+
+Each dot transitions through: `pending` → `running` → `done` / `fail`, driven by regex matching against streamed log lines in `processTLLine()`. When the user switches between Silver and Gold layer views using `setTLLayer()`, the progress card tab syncs automatically.
+
+### Gold Layer Tab Sync
+
+Switching to the Gold layer view (or having the Transform & Load pipeline enter Phase 2) automatically:
+- Switches the T&L progress card to the Gold tab
+- Relabels the floating log panel to "Gold Load Logs"
+- Sets the Silver nav dot to `done` and Gold nav dot to `running`
+
+Switching back to the Silver layer view reverses this, switching the progress card to the Silver tab.
+
+### Active Jobs Panel
+
+A live indicator shows all currently running pipeline containers. Each entry shows the application name, run date, job type (ingestion / bronze / silver / gold), and a link to stream its live logs.
+
+### App Name Normalisation
+
+The UI automatically prefixes application names on field blur:
+- Ingestion panel → `Ingestion_<name>`
+- Silver panel → `Silver_<name>`
+- Gold app name → auto-derived as `Gold_<base>` from the silver name in real time as the user types
+
+---
+
+## Scheduling System
+
+Built on **APScheduler** (`BackgroundScheduler` with `CronTrigger`), persisted in Supabase PostgreSQL (`public.scheduled_jobs` table).
+
+### Supported Job Types
+
+| Type | Behaviour |
+|---|---|
+| Ingestion | Runs the ingestion pipeline (lake layer) on cron schedule |
+| Silver | Runs silver DBT transform; optionally chains Gold Oracle load if `oracle_table` is set |
+
+### Schedule Fields
+
+| Field | Description |
+|---|---|
+| `app_name` | Application identifier (prefixed `Ingestion_` or `Silver_`) |
+| `cron_expression` | Standard cron string (e.g. `0 6 * * *`) |
+| `layer_type` | `ingestion` or `silver` |
+| `oracle_table` | Oracle target table name (silver jobs only; auto-derived as `target_table.toUpperCase()` when saving) |
+| `load_strategy` | `append` / `truncate` / `delete_and_insert` (silver jobs only, defaults to `append`) |
+| `date_column` | Date partition column name (required only for `delete_and_insert` strategy) |
+
+### Silver Schedule — DWH Gold Load Strategy
+
+The Silver schedule form includes a **"DWH Gold Load Strategy"** section directly below the cron field. This allows configuring the Gold Oracle load that runs after silver completes:
+
+- **Append** — adds all rows from silver to Oracle without removing existing data
+- **Truncate** — clears the Oracle table before inserting silver rows
+- **Delete & Insert** — deletes only the date partition matching the run date, then inserts silver rows; selecting this strategy reveals a **Date Column** input field
+
+The `oracle_table` value is automatically derived from the silver target table name (uppercased) when "Save Schedule" is clicked — no manual entry required.
+
+### Silver → Gold Chaining
+
+When a scheduled silver job has `oracle_table` set, the scheduler automatically chains an Oracle ADW load after a successful silver DBT run — the same two-phase flow as the interactive "Transform & Load" button. The Gold Docker container is launched with the stored `load_strategy`, `date_column`, and `oracle_table` values, and its logs are appended to the job run record.
+
+### Scheduled Jobs UI
+
+The Scheduled Jobs panel segregates jobs into two sections:
+- **Ingestion** — all jobs with `layer_type = ingestion`
+- **Silver Transform** — all jobs with `layer_type = silver`
+
+---
+
+## Security & Secrets Management
+
+### HashiCorp Vault
+
+Vault is the single source of truth for all runtime secrets:
+
+| Vault Path | Contents |
+|---|---|
+| `encryption/pii` | `key` (AES encryption key), `salt_2` (secondary HMAC salt) |
+| `secret/data/oracle/adw` | `user`, `password`, `dsn`, `wallet_password`, `wallet_zip_b64` |
+| `secret/data/supabase` | `password` (Supabase DB password) |
+
+**Token management:** `vault_init.py` daemon unseals Vault on startup, writes a pipeline service token to `/vault/secrets/pipeline_token` (shared Docker volume), and monitors for re-seal events to re-unseal automatically.
+
+### Authentication (Flask-Login)
+
+- Users stored in Supabase `app_users` table with Argon2id-hashed passwords
+- Session management via Flask-Login with server-side sessions
+- Root user seeded at container startup from `ROOT_PASSWORD` environment variable
+- User management UI available at `/users` for administrators
+- Security headers applied to all responses (X-Frame-Options, X-Content-Type-Options, Referrer-Policy)
+
+### PII Processing
+
+Three security levels selectable per column in the metadata sheet:
+
+| Level | Method | Output example |
+|---|---|---|
+| `hash` | HMAC-SHA256(value, SALT_KEY \|\| SALT_2) | 64-char hex digest |
+| `mask` / `pii` | Partial redaction | `AB****YZ` |
+| `encrypt` | AES-256 via Vault Transit engine | Vault ciphertext |
+
+---
+
+## API Reference
+
+### Ingestion & Bronze
+
+| Method | Endpoint | Description |
+|---|---|---|
+| `POST` | `/run` | Trigger ingestion pipeline (lake layer) |
+| `POST` | `/run-bronze` | Trigger bronze layer pipeline |
+| `GET` | `/list-bucket-keys` | List objects in source bucket |
+| `GET` | `/list-metadata-keys` | List metadata CSV files in MinIO |
+| `GET` | `/metadata-preview` | Preview metadata CSV contents |
+
+### Silver Layer
+
+| Method | Endpoint | Description |
+|---|---|---|
+| `POST` | `/silver/run-transform` | Run silver DBT transform (streaming response) |
+| `POST` | `/silver/check-table` | Check if silver Iceberg table exists |
+| `POST` | `/silver/preview-sql` | Preview generated DBT SQL |
+| `POST` | `/silver/flowchart-from-sql` | Generate column lineage flowchart from SQL |
+| `POST` | `/silver/compile-sql` | Compile DBT model (dry run) |
+| `POST` | `/silver/compile-dbt` | Full DBT compile |
+| `POST` | `/silver/convert-logic` | Convert natural language to SQL expression (OpenAI) |
+| `POST` | `/run-silver` | Run silver via Docker container |
+
+### Gold Layer
+
+| Method | Endpoint | Description |
+|---|---|---|
+| `POST` | `/run-oracle` | Run Oracle ADW load (streaming response) |
+| `POST` | `/run-transform-load` | Chained silver + gold run (streaming response) |
+
+### Scheduling
+
+| Method | Endpoint | Description |
+|---|---|---|
+| `GET` | `/scheduled-jobs` | List all scheduled jobs |
+| `POST` | `/scheduled-jobs` | Create a new scheduled job |
+| `DELETE` | `/scheduled-jobs/<id>` | Delete a scheduled job |
+| `GET` | `/scheduled-job-runs` | List recent job run history |
+
+### Monitoring & Logs
+
+| Method | Endpoint | Description |
+|---|---|---|
+| `GET` | `/active-jobs` | List currently running pipeline jobs |
+| `GET` | `/job-logs/<label>` | Stream live logs for a running job |
+| `GET` | `/log-history` | Browse historical logs from MinIO |
+| `GET` | `/view-log` | View a specific log file |
+| `GET` | `/download-log` | Download a log file |
+| `GET` | `/connectivity` | Health check all services |
+
+### Lake SQL
+
+| Method | Endpoint | Description |
+|---|---|---|
+| `POST` | `/lake-sql-run` | Execute ad-hoc SQL against lake Parquet via Spark |
+| `POST` | `/lake-ask` | Natural-language to SQL (OpenAI) then execute |
+
+---
+
+## Environment Variables
+
+| Variable | Description | Default |
+|---|---|---|
+| `MINIO_ACCESS_KEY` | MinIO root username | `minioadmin` |
+| `MINIO_SECRET_KEY` | MinIO root password | `minioadmin` |
+| `MINIO_BUCKET` | Lake bucket name | `de-data-lake` |
+| `SOURCE_S3_BUCKET` | Source data bucket name | `de-source-data-bucket` |
+| `MINIO_ENDPOINT` | MinIO S3 API URL (internal Docker) | `http://minio:9000` |
+| `MINIO_SERVER_URL` | MinIO S3 API URL (external) | `http://localhost:9000` |
+| `MINIO_BROWSER_REDIRECT_URL` | MinIO Console URL (external) | `http://localhost:9001` |
+| `VAULT_ADDR` | Vault API URL | `http://vault:8200` |
+| `VAULT_PATH` | Vault KV path for PII keys | `encryption/pii` |
+| `SALT_2` | Secondary HMAC salt (seeded to Vault on init) | — |
+| `SUPABASE_DB_PASSWORD_PLAIN` | Supabase DB password (seeded to Vault) | — |
+| `ROOT_PASSWORD` | Root user password for Flask UI | — |
+| `TRINO_HOST` | Trino hostname | `trino` |
+| `TRINO_PORT` | Trino port | `8080` |
+| `ORACLE_USER` | Oracle ADW username | — |
+| `ORACLE_PASSWORD` | Oracle ADW password | — |
+| `ORACLE_DSN` | Oracle connection DSN string | — |
+| `ORACLE_WALLET_PASSWORD` | Oracle wallet password | — |
+| `ORACLE_WALLET_ZIP_B64` | Base64-encoded wallet ZIP file | — |
+| `ORACLE_BATCH_SIZE` | Number of rows per Oracle INSERT batch | `5000` |
+| `OPENAI_API_KEY` | OpenAI API key (for SQL assist features) | — |
+| `OPENAI_MODEL` | OpenAI model ID | `gpt-4.1-nano` |
+| `CLOUDFLARE_TUNNEL_TOKEN` | Cloudflare Zero Trust tunnel token | — |
+| `BEHIND_HTTPS_PROXY` | Set to `1` when deployed behind an HTTPS proxy | — |
+
+---
+
+## Setup & Deployment
+
+### Prerequisites
+
+- Docker 24+ and Docker Compose v2
+- A Cloudflare account with a Zero Trust tunnel (optional, for external HTTPS access)
+- Oracle ADW wallet ZIP and credentials (for Gold layer)
+- OpenAI API key (optional, for AI SQL assist)
+
+### First-Time Setup
 
 ```bash
-git clone <repo-url>
+# 1. Clone the repository
+git clone <repo-url> de-metadata-framework
 cd de-metadata-framework
-```
 
-### 2. Create your `.env` file
+# 2. Create the .env file and fill in required secrets
+cp .env.example .env
+# Required: SALT_2, SUPABASE_DB_PASSWORD_PLAIN, ROOT_PASSWORD,
+#           ORACLE_USER, ORACLE_PASSWORD, ORACLE_DSN,
+#           ORACLE_WALLET_PASSWORD, ORACLE_WALLET_ZIP_B64,
+#           CLOUDFLARE_TUNNEL_TOKEN, OPENAI_API_KEY
 
-Copy the template below and fill in your values. This file is gitignored and never committed.
-
-```env
-# ── MinIO (object store) ──────────────────────────────────────────────────────
-MINIO_ACCESS_KEY=your_minio_user
-MINIO_SECRET_KEY=your_minio_password
-MINIO_BUCKET=de-data-lake
-MINIO_ENDPOINT=http://minio:9000
-MINIO_SERVER_URL=https://s3.atestingdomain.info
-MINIO_BROWSER_REDIRECT_URL=https://minio.atestingdomain.info
-
-# ── Source S3 (input data bucket) ────────────────────────────────────────────
-SOURCE_S3_ENDPOINT=http://minio:9000
-SOURCE_S3_ACCESS_KEY=your_minio_user
-SOURCE_S3_SECRET_KEY=your_minio_password
-SOURCE_S3_BUCKET=de-source-data-bucket
-
-# ── Supabase / PostgreSQL ─────────────────────────────────────────────────────
-SUPABASE_JDBC_URL=jdbc:postgresql://db.<ref>.supabase.co:5432/postgres
-SUPABASE_DB_USER=postgres
-SUPABASE_DB_PASSWORD_PLAIN=your_plain_password   # vault-init encrypts this
-# Use the IPv4 pooler to avoid IPv6 connectivity issues inside Docker:
-AUTH_DATABASE_URL=jdbc:postgresql://aws-0-<region>.pooler.supabase.com:6543/postgres?user=postgres.<ref>&password=<password>
-
-# ── HashiCorp Vault ───────────────────────────────────────────────────────────
-VAULT_ADDR=http://vault:8200
-VAULT_TOKEN=                        # leave blank; populated by vault-init
-VAULT_PATH=encryption/pii
-
-# ── PII Encryption ────────────────────────────────────────────────────────────
-SALT_KEY=your_hmac_salt_key
-SALT_2=your_secondary_salt          # seeded into Vault KV by vault-init
-
-# ── Iceberg ───────────────────────────────────────────────────────────────────
-ICEBERG_WAREHOUSE=s3a://de-iceberg-warehouse-bucket/
-ICEBERG_DATA_BUCKET=de-data-lake
-ICEBERG_METADATA_BUCKET=de-iceberg-warehouse-bucket
-ICEBERG_CATALOG=minio
-ICEBERG_DATABASE=default
-
-# ── Spark ─────────────────────────────────────────────────────────────────────
-SPARK_APP_NAME=DE-Metadata-Framework
-SPARK_MASTER=local[*]
-
-# ── Logging ───────────────────────────────────────────────────────────────────
-LOG_S3_BUCKET=de-data-migration-logs
-METADATA_S3_BUCKET=de-metadata-bucket
-
-# ── Email notifications (Brevo) ───────────────────────────────────────────────
-BREVO_API_KEY=your_brevo_api_key
-BREVO_FROM_EMAIL=noreply@yourdomain.com
-NOTIFY_EMAIL=you@yourdomain.com
-
-# ── Flask Auth ────────────────────────────────────────────────────────────────
-# Generate once: python3 -c "import secrets; print(secrets.token_hex(32))"
-# Never change after first deploy — invalidates all existing sessions.
-FLASK_SECRET_KEY=your_64_char_hex_string
-
-# Root user credentials — used only on first startup to seed the DB.
-# Remove ROOT_PASSWORD from .env after confirming login works.
-ROOT_EMAIL=root@atestingdomain.info
-ROOT_PASSWORD=YourStrongPassword@123   # min 12 chars, upper+lower+digit+special
-
-# ── Cloudflare Tunnel ─────────────────────────────────────────────────────────
-CLOUDFLARE_TUNNEL_TOKEN=eyJ...your_tunnel_token_here...
-```
-
-### 3. Generate `conf/spark-defaults.conf`
-
-`spark-defaults.conf` is gitignored. Create it from the template below — credentials are injected at runtime by the entrypoint, so use the placeholders exactly as shown:
-
-```properties
-spark.sql.extensions  org.apache.iceberg.spark.extensions.IcebergSparkSessionExtensions
-
-spark.sql.catalog.minio                        org.apache.iceberg.spark.SparkCatalog
-spark.sql.catalog.minio.type                   hadoop
-spark.sql.catalog.minio.warehouse              s3a://de-iceberg-warehouse-bucket/
-spark.sql.catalog.minio.io-impl                org.apache.iceberg.aws.s3.S3FileIO
-spark.sql.catalog.minio.s3.endpoint            http://127.0.0.1:9000
-spark.sql.catalog.minio.s3.path-style-access   true
-spark.sql.catalog.minio.s3.region              us-east-1
-spark.sql.catalog.minio.s3.access-key-id       MINIO_ACCESS_KEY_PLACEHOLDER
-spark.sql.catalog.minio.s3.secret-access-key   MINIO_SECRET_KEY_PLACEHOLDER
-
-spark.hadoop.fs.s3a.endpoint                   http://127.0.0.1:9000
-spark.hadoop.fs.s3a.path.style.access          true
-spark.hadoop.fs.s3a.connection.ssl.enabled     false
-spark.hadoop.fs.s3a.endpoint.region            us-east-1
-spark.hadoop.fs.s3a.aws.credentials.provider   org.apache.hadoop.fs.s3a.SimpleAWSCredentialsProvider
-spark.hadoop.fs.s3a.access.key                 MINIO_ACCESS_KEY_PLACEHOLDER
-spark.hadoop.fs.s3a.secret.key                 MINIO_SECRET_KEY_PLACEHOLDER
-
-# spark.jars.packages is commented out in the Docker image (JARs are baked in).
-# Uncomment for local development:
-# spark.jars.packages org.apache.iceberg:iceberg-spark-runtime-4.1_2.13:1.11.0,...
-```
-
-### 4. Build the Docker image
-
-```bash
-docker compose build --progress=plain
-```
-
-First build takes several minutes — downloads pip packages and Maven JARs, then caches everything. Subsequent builds are fast.
-
-### 5. Start infrastructure
-
-```bash
+# 3. Start infrastructure first (MinIO + Vault)
 docker compose up -d minio vault
+
+# 4. Start Vault daemon (auto-unseals and seeds all secrets)
+docker compose up -d vault-init
+
+# 5. Start remaining services
+docker compose up -d
+
+# 6. Open the UI
+open http://localhost:5001
+# Login with: root / <ROOT_PASSWORD from .env>
 ```
 
-### 6. Bootstrap Vault (once only)
-
-```bash
-docker compose run --rm vault-init
-```
-
-Initialises and unseals Vault, creates PII encryption keys, seeds KV secrets, encrypts your Supabase password, and writes a scoped pipeline token to the shared `vault_secrets` volume. Idempotent — safe to re-run, skips steps already done.
-
-### 7. Start the UI (seeds root user on first start)
-
-```bash
-docker compose up -d ui cloudflared
-```
-
-On first startup, `seed_root_user.py` runs automatically and creates the `root` user in Supabase using `ROOT_PASSWORD` from `.env`. The root user's credentials are printed to the UI container log if auto-generated:
-
-```bash
-docker logs de-ui 2>&1 | grep -A3 "ROOT USER"
-```
-
-Open **https://app.atestingdomain.info** (or **http://localhost:5001**) and log in with `root` / `ROOT_PASSWORD`.
-
-**After confirming login works, remove `ROOT_PASSWORD` from `.env`** — the root account persists in the database.
-
-### 8. Add team users
-
-Log in as `root`, navigate to **Users** in the top-right menu, and create accounts for your team. Only the `root` role can create users. Password requirements:
-- Minimum 12 characters
-- At least one uppercase, lowercase, digit, and special character
-- Must not appear in known data breach databases (HaveIBeenPwned check)
-
----
-
-## Subsequent Starts
-
-Once the initial setup is done:
+### Subsequent Starts
 
 ```bash
 docker compose up -d
 ```
 
-To stop:
+### Running a Pipeline Manually
 
 ```bash
-docker compose down
-```
-
-> Data is persisted in Docker volumes (`minio_data`, `vault_data`). Your ingested tables, logs, and user accounts survive restarts.
-
-> **Vault sealed after restart?** Run `docker compose run --rm vault-init` — it detects the sealed state and unseals using the saved key.
-
----
-
-## Running the Pipeline
-
-### Via the Web UI
-
-1. Open **https://app.atestingdomain.info** and log in
-2. Fill in the job form:
-   - **Application Name** — identifier for this dataset
-   - **Source Type** — S3 or Database
-   - **Ingest Date** — date partition (`YYYY-MM-DD`)
-   - **Metadata Key** — S3 path to the metadata sheet CSV
-   - **Output settings** — database, catalog, table name, write mode
-3. Click **Run Pipeline**
-4. Logs stream in real-time in the right panel
-5. Download the log from S3 after the job completes
-
-The UI delegates execution to a fresh pipeline container via the Docker socket — Spark runs in the pipeline image, not the UI image.
-
-### Via CLI
-
-```bash
+# Ingestion (lake layer) — via Docker Compose
 docker compose run --rm pipeline \
-  --application-name my_dataset \
+  --application-name Ingestion_MyApp \
   --source-type s3 \
-  --ingest-date 2026-01-15 \
-  --source-bucket de-source-data-bucket \
-  --source-key raw/my_dataset/data.parquet \
-  --metadata-key metadata/my_dataset_schema.csv \
-  --output-database default \
-  --output-table-name my_dataset \
-  --write-mode overwrite \
-  --log-level INFO
+  --run-date 2024-01-15
+
+# Bronze and Silver layers are triggered from the UI
+# or via direct POST requests to the Flask API
 ```
 
-For a database source:
+### DBT Development
+
+The `transformation/` directory is volume-mounted live into the `de-ui` container, so DBT models written by the UI are immediately available on the host filesystem:
 
 ```bash
-docker compose run --rm pipeline \
-  --application-name my_table \
-  --source-type database \
-  --ingest-date 2026-01-15 \
-  --source-database public \
-  --source-table-name orders \
-  --metadata-key metadata/orders_schema.csv \
-  --output-database default \
-  --write-mode append
+# Run DBT manually inside the container
+docker exec -it de-ui bash
+cd /app/transformation
+dbt run --target docker --select my_silver_model
+dbt compile --target docker
 ```
 
-### S3 Source Key Date Resolution
-
-The `--source-key` argument supports automatic date resolution using `__` as a mandatory separator between the static prefix and the date component:
-
-- **Exact match** — key is used as-is if the object exists
-- **Token substitution** — if the key contains `__<TOKEN>` (e.g. `file__YYYY-MM-DD.csv`), the token is replaced with `ingest_date` in the matching format
-- **Prefix listing** — if the key contains `__` but no known token, S3 objects are listed under the prefix before `__` and matched by date
-- **No `__` separator** — if the key has no `__` and the exact object doesn't exist, the job fails immediately (no date substitution is attempted)
-
-Supported tokens (all require `__` prefix in the key): `YYYY-MM-DD`, `DD-MM-YYYY`, `MM-DD-YYYY`, `YYYY_MM_DD`, `DD_MM_YYYY`, `MM_DD_YYYY`, `YYYYMMDD`, `DDMMYYYY`
-
-Example:
-```
-source_key = data/sales__YYYY-MM-DD.csv   → resolves to data/sales__2026-01-15.csv
-source_key = data/sales__20260115.csv     → used as-is (exact match)
-source_key = data/sales.csv               → used as-is or fails if not found
-```
-
-### Running the Bronze Pipeline
-
-The bronze layer reads from `minio.de_lake.<app>`, deduplicates using primary keys from the metadata sheet, and writes to `minio.de_bronze.<app>` (partitioned by `days(snapshot_date)`).
-
-**Full run** (processes a single `ingest_date` partition from the lake):
+### Health Checks
 
 ```bash
-docker compose run --rm pipeline bronze \
-  --application-name my_dataset \
-  --run-date 2026-01-15 \
-  --run-type full \
-  --metadata-key metadata/my_dataset_schema.csv \
-  --log-level INFO
+# Check all services at once
+curl http://localhost:5001/connectivity
+
+# Individual service health endpoints
+curl http://localhost:9000/minio/health/live     # MinIO
+curl http://localhost:8200/v1/sys/health         # Vault
+curl http://localhost:8081/v1/info               # Trino
 ```
-
-**Delta run** (merges lake data with the previous bronze snapshot (union + priority dedup)):
-
-```bash
-docker compose run --rm pipeline bronze \
-  --application-name my_dataset \
-  --run-date 2026-01-15 \
-  --run-type delta \
-  --metadata-key metadata/my_dataset_schema.csv
-```
-
-> **Typical workflow:** run ingestion first to land data in the lake, then run bronze to produce the deduplicated snapshot.
-
-### Interactive Spark Shell (Debugging)
-
-To open an interactive shell inside the pipeline container with Spark credentials already injected:
-
-```bash
-docker compose run --rm -it pipeline shell
-```
-
-This runs the entrypoint seds (substituting MinIO credentials into `spark-defaults.conf`) before dropping into `/bin/sh`. From there you can run `spark-sql` or `pyspark` and query Iceberg tables:
-
-```sql
--- inside spark-sql
-SHOW TABLES IN minio.de_lake;
-SHOW TABLES IN minio.de_bronze;
-SELECT * FROM minio.de_lake.my_dataset LIMIT 10;
-```
-
-> **Never use** `--entrypoint /bin/sh` directly — that bypasses the entrypoint and leaves `MINIO_ACCESS_KEY_PLACEHOLDER` unreplaced in the Spark config, causing 403 errors.
 
 ---
 
-## Scheduled Jobs
+## Tech Stack
 
-The UI supports APScheduler-backed scheduled pipeline jobs stored in PostgreSQL.
-
-**Database tables:**
-- `public.scheduled_jobs` — stores all active schedules (application_name is unique — saving again updates the existing schedule)
-- `public.scheduled_job_runs` — stores run history including full container stdout/stderr logs per execution
-
-**Scheduling a job:**
-1. Fill in the pipeline form as normal
-2. Check "Schedule this job" — if the application_name already has a saved schedule, the cron expression is pre-filled and the button shows "Update Schedule"
-3. Enter a cron expression (5-part: `min hour day month weekday`). A human-readable description is shown live (e.g. `0 2 * * 1` → "At 02:00 AM on Monday")
-4. Click "Save Schedule" / "Update Schedule"
-
-**Scheduled Jobs page:**
-Click "📅 Scheduled Jobs" in the top navbar to open a full-page overlay with:
-- **Left panel** — all active scheduled jobs with name, cron expression, human-readable schedule, and last-run status badge
-- **Right panel** — run history for the selected job: each run shows status badge, run date, start timestamp, and expandable full container logs (stdout + stderr)
-
-**APScheduler behaviour:**
-- Scheduler starts with the UI container and loads all active jobs from DB on startup (survives container restarts via DB persistence)
-- Each scheduled trigger runs the ingestion pipeline (lake layer only) with `ingest_date = today()`
-- After each run, `last_run_at`, `last_run_status`, and full logs are written to `public.scheduled_job_runs`
-- Deleting a schedule soft-deletes the DB row (`is_active = FALSE`) and removes the APScheduler trigger
-
-**New Flask routes:**
-| Route | Method | Description |
-|---|---|---|
-| `/scheduled-jobs` | GET | List all active scheduled jobs |
-| `/scheduled-jobs` | POST | Create or update a scheduled job (upsert on application_name) |
-| `/scheduled-jobs/<id>` | DELETE | Soft-delete and remove from scheduler |
-| `/scheduled-job-runs` | GET | List run history (filter by `?job_id=<id>`) |
-
----
-
-## Pipeline CLI Reference
-
-| Argument | Required | Default | Description |
-|---|---|---|---|
-| `--application-name` | Yes | — | Dataset / job identifier |
-| `--source-type` | Yes | — | `s3` or `database` |
-| `--ingest-date` | Yes | — | Partition date (`YYYY-MM-DD`) |
-| `--metadata-key` | No | env | S3 key to metadata sheet CSV |
-| `--source-bucket` | S3 only | env | Source S3 bucket |
-| `--source-key` | S3 only | — | S3 object key (path to file) |
-| `--source-database` | DB only | `public` | PostgreSQL schema |
-| `--source-table-name` | DB only | — | Table to read |
-| `--output-database` | No | env | Iceberg namespace |
-| `--output-catalog` | No | `minio` | Iceberg catalog |
-| `--output-table-name` | No | application-name | Iceberg table name |
-| `--write-mode` | No | `overwrite` | `overwrite`, `append`, or `replace` |
-| `--log-folder` | No | `lake` | Top-level folder in log bucket |
-| `--log-level` | No | `INFO` | `DEBUG`, `INFO`, `WARNING`, `ERROR` |
-
----
-
-## Bronze Pipeline CLI Reference
-
-| Argument | Required | Default | Description |
-|---|---|---|---|
-| `--application-name` | Yes | — | Dataset identifier (must match the lake table name) |
-| `--run-date` | Yes | — | Date to process (`YYYY-MM-DD`) |
-| `--run-type` | No | `full` | `full` = lake run_date partition only; `delta` = snapshot union merge |
-| `--catalog` | No | `ICEBERG_CATALOG` env | Iceberg catalog name |
-| `--lake-database` | No | `LAKE_DATABASE` env | Source Iceberg namespace (default: `de_lake`) |
-| `--bronze-database` | No | `BRONZE_DATABASE` env | Target Iceberg namespace (default: `de_bronze`) |
-| `--metadata-key` | No | env | S3 key of the metadata sheet CSV |
-| `--log-level` | No | `INFO` | `DEBUG`, `INFO`, `WARNING`, `ERROR` |
-| `--log-folder` | No | `bronze` | Top-level folder in log bucket |
-
----
-
-## Metadata Sheet Format
-
-The pipeline is driven by a CSV metadata sheet uploaded to MinIO. Each row defines one column:
-
-### Lake ingestion columns
-
-| Column | Description |
+| Category | Technology |
 |---|---|
-| `column_name` | Exact column name in the source data |
-| `data_type` | Target type: `string`, `integer`, `double`, `date`, `timestamp`, `boolean` |
-| `nullable` | `true` / `false` |
-| `pii_action` | `hash`, `mask`, `encrypt`, or blank (no action) |
-| `description` | Human-readable description |
-
-### Additional columns for the bronze layer
-
-| Column | Description |
-|---|---|
-| `primary_key` | `true` / `yes` / `1` — marks columns that together form the unique row key (used for deduplication) |
-| `is_timestamp` | `true` / `yes` / `1` — marks the timestamp column used to keep the latest row when duplicates exist on the primary key |
-
-> The bronze layer uses `primary_key` columns to deduplicate. If `is_timestamp` is set, the row with the highest timestamp value is kept; otherwise `dropDuplicates` is used. At least one `primary_key` column is required for `delta` mode.
-
-See `metadata/metadata_sheet_example.csv` for a working example.
-
----
-
-## Vault & Secrets
-
-Vault is used for three things:
-
-1. **PII encryption key export** — `pii-encrypt` transit key (exportable AES-256-GCM) is fetched by Spark for column encryption.
-2. **Supabase password decryption** — `supabase-pwd` transit key (non-exportable) decrypts the ciphertext loaded from the shared volume at pipeline startup.
-3. **Auth DB password** — `ui/db.py` decrypts the Supabase password via Vault Transit before opening the psycopg2 connection for user authentication.
-
-The pipeline token written by `vault-init` is scoped to exactly these operations plus KV read access. Tokens are short-lived (24h, auto-renewable).
-
----
-
-## Environment Variables Reference
-
-| Variable | Default | Description |
-|---|---|---|
-| `LAKE_DATABASE` | `de_lake` | Iceberg namespace for lake layer tables |
-| `BRONZE_DATABASE` | `de_bronze` | Iceberg namespace for bronze layer tables |
-| `BRONZE_DATA_BUCKET` | `de-data-bronze` | MinIO bucket for bronze Iceberg Parquet data |
-| `MINIO_ENDPOINT` | `http://minio:9000` | MinIO S3 API URL (internal) |
-| `MINIO_SERVER_URL` | `http://localhost:9000` | MinIO S3 public URL (embedded in redirects) |
-| `MINIO_BROWSER_REDIRECT_URL` | `http://localhost:9001` | MinIO Console public URL |
-| `MINIO_ACCESS_KEY` | `minioadmin` | MinIO access key |
-| `MINIO_SECRET_KEY` | `minioadmin` | MinIO secret key |
-| `MINIO_BUCKET` | `de-data-lake` | Sink bucket for Iceberg data |
-| `SOURCE_S3_ENDPOINT` | `http://minio:9000` | Source S3 endpoint (internal) |
-| `SOURCE_S3_ACCESS_KEY` | `minioadmin` | Source access key |
-| `SOURCE_S3_SECRET_KEY` | `minioadmin` | Source secret key |
-| `SOURCE_S3_BUCKET` | `de-source-data-bucket` | Source bucket name |
-| `SUPABASE_JDBC_URL` | — | PostgreSQL JDBC connection string (direct host) |
-| `AUTH_DATABASE_URL` | — | PostgreSQL pooler URL for auth DB (IPv4, preferred over SUPABASE_JDBC_URL) |
-| `SUPABASE_DB_USER` | `postgres` | Database user |
-| `SUPABASE_DB_PASSWORD_PLAIN` | — | Plain password for vault-init encryption only |
-| `VAULT_ADDR` | `http://vault:8200` | Vault API address |
-| `VAULT_TOKEN` | — | Pipeline-scoped Vault token |
-| `VAULT_PATH` | `encryption/pii` | KV path for PII secrets |
-| `SALT_KEY` | — | HMAC-SHA256 salt for hashing |
-| `SALT_2` | — | Secondary salt seeded into Vault KV |
-| `ICEBERG_WAREHOUSE` | `s3a://de-iceberg-warehouse-bucket/` | Iceberg catalog warehouse root |
-| `ICEBERG_DATA_BUCKET` | `de-data-lake` | Bucket for Iceberg Parquet data files |
-| `ICEBERG_METADATA_BUCKET` | `de-iceberg-warehouse-bucket` | Bucket for Iceberg table metadata |
-| `ICEBERG_CATALOG` | `minio` | Iceberg catalog name |
-| `ICEBERG_DATABASE` | `default` | Default Iceberg namespace |
-| `LOG_S3_BUCKET` | `de-data-migration-logs` | Bucket for pipeline logs |
-| `METADATA_S3_BUCKET` | `de-metadata-bucket` | Bucket for metadata sheets |
-| `BREVO_API_KEY` | — | Brevo transactional email API key |
-| `BREVO_FROM_EMAIL` | — | Sender address for notifications |
-| `NOTIFY_EMAIL` | — | Recipient address for notifications |
-| `FLASK_SECRET_KEY` | — | Flask session signing key — generate once, never change |
-| `ROOT_EMAIL` | — | Email for the root user created on first startup |
-| `ROOT_PASSWORD` | — | Password for root user (remove from `.env` after first login) |
-| `FLASK_DEBUG` | `0` | Set to `1` to enable Flask debug mode |
-| `CLOUDFLARE_TUNNEL_TOKEN` | — | Token from Cloudflare Zero Trust dashboard |
-
----
-
-## Rebuilding After Changes
-
-| Changed file | Action needed |
-|---|---|
-| `requirements.txt` or `requirements-heavy.txt` | `docker compose build` |
-| `conf/spark-defaults.conf` | `docker compose build` (conf is baked into image) |
-| `ingestion/**` or `ui/**` | `docker compose build` |
-| `bronze_layer/**` | `docker compose build` (bronze_layer.zip is rebuilt in the image) |
-| `docker-compose.yml` only | `docker compose up -d` (no rebuild) |
-| `.env` only | `docker compose up -d` (no rebuild) |
-
----
-
-## Troubleshooting
-
-**App returns 502 on Cloudflare (intermittent — works on some devices, not others)**
-You likely have two cloudflared connectors attached to the same tunnel. This happens if a native `cloudflared` daemon (e.g. installed via Homebrew) is running alongside the Docker `cloudflared` container. Cloudflare round-robins between connectors — the native one can't reach `de-ui:5000` inside Docker networking, causing alternating 502s.
-
-Check in Cloudflare Zero Trust → Networks → Tunnels → your tunnel → Connectors. If you see two connectors, disable the native one:
-```bash
-sudo launchctl stop com.cloudflare.cloudflared
-sudo launchctl disable system/com.cloudflare.cloudflared
-```
-
-Only the Docker `cloudflared` container should be connected. Verify with `docker compose ps cloudflared` and confirm it uses `--protocol http2` (not quic) — QUIC fails silently under Docker Desktop's NAT.
-
-**Pipeline container exits immediately**
-Check logs: `docker compose logs pipeline`. Ensure `vault-init` completed and `minio` is healthy.
-
-**Vault sealed after restart**
-Run `docker compose run --rm vault-init` — detects sealed state and unseals using the saved key in `vault_data`.
-
-**MinIO bucket not found**
-Run `docker compose run --rm minio-init` to re-provision buckets.
-
-**Login page: "Account temporarily locked"**
-Account locks for 15 minutes after 5 failed attempts. Wait, or manually reset in Supabase: `UPDATE public.app_users SET failed_attempts=0, locked_until=NULL WHERE username='...'`
-
-**Lost root password**
-Connect to Supabase directly and update the password hash, or delete the root row and let `seed_root_user.py` recreate it (set `ROOT_PASSWORD` in `.env` first, then restart the UI container).
-
-**Spark downloading JARs on every run**
-JARs are baked into the image. If you see Maven downloads, rebuild: `docker compose build --no-cache`.
-
-**s3.atestingdomain.info returns 400 or 403 in browser**
-This is expected — the MinIO S3 API requires authenticated S3 requests. Use the MinIO Console at `https://minio.atestingdomain.info` for browser access, or the `mc` CLI for S3 operations:
-```bash
-mc alias set remote https://s3.atestingdomain.info <access-key> <secret-key>
-mc ls remote/
-```
-
-### MinIO CLI Access
-
-The `awscli` service provides an AWS CLI pre-configured to talk to MinIO — no `--endpoint-url` flag needed. The `docker/awscli-entrypoint.sh` entrypoint pre-sets `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, and `AWS_ENDPOINT_URL` from env vars automatically.
-
-```bash
-# Open an interactive shell with AWS CLI pre-configured for MinIO
-docker compose run --rm awscli shell
-
-# Run AWS CLI commands directly against MinIO
-docker compose run --rm awscli s3 ls
-docker compose run --rm awscli s3 ls s3://de-source-data-bucket/
-```
+| **Container Orchestration** | Docker Compose |
+| **Object Storage** | MinIO (S3-compatible) |
+| **Secrets Management** | HashiCorp Vault (KV v2, Transit engine) |
+| **Iceberg Catalog** | Apache Hive Metastore 3.x |
+| **Table Format** | Apache Iceberg |
+| **SQL Engine** | Trino 482 |
+| **Transformation** | dbt-core + dbt-trino adapter |
+| **Batch Processing** | Apache Spark 3.x (PySpark) |
+| **Web Framework** | Flask 3.x |
+| **Authentication** | Flask-Login + Argon2id password hashing |
+| **Job Scheduling** | APScheduler (BackgroundScheduler + CronTrigger) |
+| **App Database** | PostgreSQL 15 (Supabase) |
+| **DWH Target** | Oracle Autonomous Data Warehouse |
+| **Oracle Driver** | python-oracledb (thin mode + wallet ZIP) |
+| **AI Assist** | OpenAI API |
+| **External Access** | Cloudflare Tunnel (Zero Trust) |
+| **File Format** | Apache Parquet + Snappy compression |
+| **Language** | Python 3.11+ |

@@ -18,8 +18,6 @@ COPY docker/pip_install.sh /usr/local/bin/pip_install
 RUN chmod +x /usr/local/bin/pip_install
 
 # ── Heavy deps (PySpark, pandas, pyarrow, grpcio) ────────────────────────────
-# Separate layer — only rebuilds when requirements-heavy.txt changes.
-# pip_install skips any package already at the required version.
 COPY requirements-heavy.txt .
 RUN --mount=type=cache,target=/root/.cache/pip \
     pip_install requirements-heavy.txt
@@ -29,16 +27,14 @@ COPY requirements.txt .
 RUN --mount=type=cache,target=/root/.cache/pip \
     pip_install requirements.txt
 
+# ── Oracle ADW client (prebuilt aarch64 wheel available from oracledb package) ─
+RUN pip install --quiet oracledb
+
 # ── Bake Spark config ─────────────────────────────────────────────────────────
 COPY conf/ conf/
 ENV SPARK_CONF_DIR=/app/conf
 
 # ── Download Spark JARs (cached on host, baked into image) ───────────────────
-# BuildKit cache mount persists downloaded JARs on the host across builds.
-# First build: downloads from Maven Central.
-# Subsequent builds: copies from host cache — no network hit.
-# JARs land in $SPARK_HOME/jars/ so Spark auto-loads them; spark.jars.packages
-# is commented out in the image so Ivy never runs at runtime.
 RUN --mount=type=cache,target=/root/.spark-jars-cache \
     SPARK_JARS=$(python3 -c "import pyspark, os; print(os.path.join(os.path.dirname(pyspark.__file__), 'jars'))") && \
     CACHE=/root/.spark-jars-cache && \
@@ -65,14 +61,21 @@ RUN --mount=type=cache,target=/root/.spark-jars-cache \
     sed -i 's|^spark\.jars\.packages|# spark.jars.packages|' /app/conf/spark-defaults.conf
 
 # ── Application code ──────────────────────────────────────────────────────────
-COPY ingestion/    ingestion/
-COPY bronze_layer/ bronze_layer/
-COPY ui/           ui/
+COPY ingestion/       ingestion/
+COPY bronze_layer/    bronze_layer/
+COPY ui/              ui/
+COPY transformation/  transformation/
+COPY oracle_layer/    oracle_layer/
 RUN cd /app && zip -r ingestion.zip ingestion/ && zip -r bronze_layer.zip bronze_layer/
 
+# ── Install DBT packages ──────────────────────────────────────────────────────
+RUN cd /app/transformation && dbt deps --profiles-dir /app/transformation
+
 # ── Docker helpers ────────────────────────────────────────────────────────────
-COPY docker/vault_init.py      docker/vault_init.py
-COPY docker/seed_root_user.py  docker/seed_root_user.py
+COPY docker/vault_init.py         docker/vault_init.py
+COPY docker/seed_root_user.py     docker/seed_root_user.py
+COPY docker/sql_runner.py         docker/sql_runner.py
+COPY docker/spark_query_server.py docker/spark_query_server.py
 COPY docker/entrypoint.sh    /entrypoint.sh
 COPY docker/ui-entrypoint.sh /ui-entrypoint.sh
 RUN chmod +x /entrypoint.sh /ui-entrypoint.sh
