@@ -3,6 +3,9 @@
 A self-hosted, end-to-end data engineering platform implementing the **Medallion Architecture** (Lake → Bronze → Silver → Gold) with a metadata-driven pipeline, web UI, real-time log streaming, and Oracle ADW integration — fully containerised with Docker Compose.
 
 ---
+<img width="1672" height="941" alt="image" src="https://github.com/user-attachments/assets/c183341e-a38e-4ef3-bcd4-8378613cac41" />
+
+---
 
 ## Table of Contents
 
