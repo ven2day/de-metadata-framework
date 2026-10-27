@@ -190,9 +190,12 @@ def bootstrap():
         "oracle_wallet_password": ORACLE_WALLET_PASSWORD,
         "oracle_wallet_zip_b64":  ORACLE_WALLET_ZIP_B64,
     }
-    r = _post("secret/data/oracle/adw", {"data": oracle_data}, root_token)
-    r.raise_for_status()
-    print("[vault-init] Wrote Oracle ADW credentials → secret/data/oracle/adw")
+    # Legacy integration only: never seed or overwrite Oracle secrets for the
+    # Docker-only Gold workflow, including on restarts with blank settings.
+    if ORACLE_USER and ORACLE_PASSWORD and ORACLE_DSN:
+        r = _post("secret/data/oracle/adw", {"data": oracle_data}, root_token)
+        r.raise_for_status()
+        print("[vault-init] Wrote legacy Oracle credentials → secret/data/oracle/adw")
 
     # ── Pipeline policy + token ───────────────────────────────────────────────
     policy_hcl = (

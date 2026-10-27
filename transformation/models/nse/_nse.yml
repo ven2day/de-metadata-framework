@@ -1,0 +1,53 @@
+version: 2
+
+sources:
+  - name: dhan_bronze
+    database: "{{ env_var('ICEBERG_CATALOG', 'minio') }}"
+    schema: "{{ env_var('BRONZE_DATABASE', 'de_bronze') }}"
+    tables:
+      - name: nse_live_ticks
+        identifier: "{{ var('dhan_live_source_table', 'nse_live_ticks') }}"
+        description: Dhan JSONL events promoted through the live-event Bronze metadata contract.
+      - name: nse_market_snapshot
+        identifier: "{{ var('dhan_snapshot_source_table', 'nse_market_snapshot') }}"
+        description: Latest REST market quote per Dhan instrument in each Bronze snapshot.
+
+models:
+  - name: nse_market_snapshot
+    description: Daily NSE instrument snapshots; replay updates the same instrument/date key.
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns: ['exchange_segment', 'security_id', 'snapshot_date']
+    columns:
+      - name: exchange_segment
+        tests:
+          - not_null
+      - name: security_id
+        tests:
+          - not_null
+      - name: snapshot_date
+        tests:
+          - not_null
+  - name: nse_live_ticks
+    description: Replay-safe NSE live events with original UTC timestamps and Indian trading dates.
+    columns:
+      - name: event_id
+        tests:
+          - not_null
+          - unique
+      - name: exchange_segment
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ['NSE_EQ', 'NSE_FNO', 'NSE_CURRENCY', 'IDX_I']
+      - name: security_id
+        tests:
+          - not_null
+      - name: received_at
+        tests:
+          - not_null
+      - name: trading_date
+        tests:
+          - not_null

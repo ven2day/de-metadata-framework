@@ -1,0 +1,63 @@
+# Isolated integration stack. Use only with -p de-compat --env-file .env.example.
+# All credentials below are throwaway fixtures for volumes owned by de-compat.
+x-compat-image: &compat-image
+  image: de-compat-pipeline:latest
+
+services:
+  minio:
+    container_name: de-compat-minio
+    ports: !reset []
+  minio-init:
+    container_name: de-compat-minio-init
+  vault:
+    container_name: de-compat-vault
+    ports: !reset []
+  vault-storage-init:
+    container_name: de-compat-vault-storage-init
+  vault-init:
+    <<: *compat-image
+    container_name: de-compat-vault-init
+    environment:
+      SALT_2: compat-only-secondary-salt-0123456789
+  postgres-meta:
+    container_name: de-compat-postgres-meta
+  postgres-app:
+    container_name: de-compat-postgres-app
+  hive-metastore:
+    container_name: de-compat-hive-metastore
+    ports: !reset []
+  trino:
+    container_name: de-compat-trino
+    ports: !reset []
+  spark-sql:
+    <<: *compat-image
+    container_name: de-compat-spark-sql
+    environment:
+      SPARK_MASTER: local[2]
+  ui:
+    <<: *compat-image
+    container_name: de-compat-ui
+    ports: !override
+      - '127.0.0.1:15001:5000'
+    environment:
+      COMPOSE_PROJECT_NAME: de-compat
+      DHAN_SYMBOLS_FILE: ''
+      FLASK_SECRET_KEY: compat-only-flask-secret-0123456789abcdef
+      ROOT_PASSWORD: CompatOnly!Passw0rd2026
+      SALT_KEY: compat-only-primary-salt-0123456789
+      SPARK_MASTER: local[2]
+    volumes: !override
+      - vault_secrets:/vault/secrets:ro
+      - dhan_secrets:/run/secrets:ro
+      - dhan_instruments:/var/cache/dhan
+      - ./symbols.csv:/app/config/symbols.csv:ro
+      - /var/run/docker.sock:/var/run/docker.sock
+  pipeline:
+    <<: *compat-image
+    container_name: de-compat-pipeline
+    environment:
+      SPARK_MASTER: local[2]
+      SALT_KEY: compat-only-primary-salt-0123456789
+    volumes:
+      - ./tests:/checks:ro
+      - ./examples:/examples:ro

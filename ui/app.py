@@ -9,7 +9,10 @@ from apscheduler.triggers.cron import CronTrigger
 from werkzeug.middleware.proxy_fix import ProxyFix
 
 app = Flask(__name__)
-app.secret_key = os.environ["FLASK_SECRET_KEY"]
+_flask_secret = os.environ.get("FLASK_SECRET_KEY", "").strip()
+if not _flask_secret or _flask_secret.startswith("REQUIRED_"):
+    raise RuntimeError("FLASK_SECRET_KEY is required; generate one and set it in .env")
+app.secret_key = _flask_secret
 
 # ── Proxy trust (Cloudflare Tunnel sends X-Forwarded-Proto / X-Forwarded-For) ──
 _BEHIND_PROXY = os.environ.get("BEHIND_HTTPS_PROXY", "0") == "1"
@@ -30,21 +33,44 @@ PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 sys.path.insert(0, PROJECT_ROOT)
 
 from ingestion.env.DE_Ingestion_properties import (
-    MINIO_ENDPOINT, MINIO_ACCESS_KEY, MINIO_SECRET_KEY, LOG_S3_BUCKET, VAULT_ADDR,
-    SOURCE_S3_ENDPOINT, SOURCE_S3_ACCESS_KEY, SOURCE_S3_SECRET_KEY, METADATA_S3_BUCKET,
+    BRONZE_DATABASE, ICEBERG_CATALOG, ICEBERG_METADATA_BUCKET, LAKE_DATABASE, MINIO_ENDPOINT, MINIO_REGION,
+    MINIO_ACCESS_KEY, MINIO_SECRET_KEY, LOG_S3_BUCKET, SILVER_DATABASE,
+    SILVER_DATA_BUCKET, VAULT_ADDR,
+    SOURCE_S3_ENDPOINT, SOURCE_S3_ACCESS_KEY, SOURCE_S3_REGION, SOURCE_S3_SECRET_KEY,
+    METADATA_S3_BUCKET,
 )
+from gold_layer.gold_loader import (
+    GoldConfig, identifier as validate_sql_identifier, resolve_tables,
+    run_date as validate_gold_run_date,
+)
+
+GOLD_DATABASE = os.environ.get("GOLD_DATABASE", "de_gold")
 
 # ── Extensions ─────────────────────────────────────────────────────────────────
 from ui.extensions import csrf, login_manager, limiter
+from ui.job_runtime import background_job_stream, scheduled_run_date
+from ui.dhan_setup import india_date, inspect_setup as inspect_dhan_setup, snapshot_form as dhan_snapshot_form
+from ui.dhan_setup import reject_credentials as reject_dhan_credentials
+from ingestion.dhan.instruments import (
+    DhanInstrumentError, configured_selection as configured_dhan_selection,
+    parse_symbols as parse_dhan_symbols,
+    resolve_selection as resolve_dhan_selection,
+)
+from ui.db import close_connection
 
 csrf.init_app(app)
 login_manager.init_app(app)
 limiter.init_app(app)
+app.teardown_appcontext(close_connection)
 
 @login_manager.user_loader
 def load_user(user_id: str):
     from ui.models import User
-    return User.get_by_id(int(user_id))
+    try:
+        user = User.get_by_id(int(user_id))
+    except (TypeError, ValueError):
+        return None
+    return user if user and user.is_active else None
 
 # ── Auth blueprint ─────────────────────────────────────────────────────────────
 from ui.auth import auth_bp
@@ -90,8 +116,64 @@ _PROJECT          = os.environ.get("COMPOSE_PROJECT_NAME", "de-metadata-framewor
 _PIPELINE_IMAGE   = f"{_PROJECT}-pipeline"
 _COMPOSE_NETWORK  = f"{_PROJECT}_de-net"
 _VAULT_VOL        = f"{_PROJECT}_vault_secrets"
+_DHAN_VOL         = f"{_PROJECT}_dhan_secrets"
+_DHAN_INSTRUMENT_VOL = f"{_PROJECT}_dhan_instruments"
 
-_SKIP_ENV = {"FLASK_DEBUG", "FLASK_ENV", "WERKZEUG_RUN_MAIN", "HOSTNAME"}
+_COMMON_JOB_ENV_KEYS = frozenset({
+    "MINIO_ENDPOINT", "MINIO_REGION", "MINIO_ACCESS_KEY", "MINIO_SECRET_KEY", "MINIO_BUCKET",
+    "SOURCE_S3_ENDPOINT", "SOURCE_S3_ACCESS_KEY", "SOURCE_S3_SECRET_KEY",
+    "SOURCE_S3_BUCKET", "SOURCE_S3_REGION",
+    "METADATA_S3_BUCKET", "METADATA_S3_KEY",
+    "SPARK_APP_NAME", "SPARK_MASTER", "SPARK_PACKAGES", "HIVE_METASTORE_URI",
+    "ICEBERG_WAREHOUSE", "ICEBERG_DATA_BUCKET", "ICEBERG_METADATA_BUCKET",
+    "ICEBERG_CATALOG", "ICEBERG_DATABASE",
+    "LAKE_DATABASE", "BRONZE_DATABASE", "BRONZE_DATA_BUCKET",
+    "TRANSFORMATION_DATABASE", "TRANSFORMATION_DATA_BUCKET",
+    "SILVER_DATABASE", "SILVER_DATA_BUCKET", "GOLD_DATABASE", "GOLD_DATA_BUCKET", "LOG_S3_BUCKET",
+    "SALT_KEY", "VAULT_ADDR", "VAULT_NAMESPACE", "VAULT_PATH",
+    "BREVO_API_KEY", "BREVO_FROM_EMAIL", "NOTIFY_EMAIL",
+    "AWS_REGION", "AWS_DEFAULT_REGION", "TRINO_HOST", "TRINO_PORT",
+})
+_DATABASE_JOB_ENV_KEYS = frozenset({
+    "SUPABASE_URL", "SUPABASE_KEY", "SUPABASE_JDBC_URL",
+    "SUPABASE_DB_USER", "SUPABASE_DB_PASSWORD",
+})
+_DHAN_JOB_ENV_KEYS = frozenset({
+    "DHAN_CLIENT_ID", "DHAN_ACCESS_TOKEN", "DHAN_ACCESS_TOKEN_FILE",
+    "DHAN_PIN",
+    "DHAN_TOTP_SECRET", "DHAN_INSTRUMENTS", "DHAN_SYMBOLS", "DHAN_SYMBOLS_FILE", "DHAN_INSTRUMENT_CACHE_FILE", "DHAN_SNAPSHOT_MODE",
+    "DHAN_HTTP_TIMEOUT_SECONDS",
+})
+
+
+def _job_environment(source_type: str = "") -> dict[str, str]:
+    """Return only the settings needed by a child pipeline container.
+
+    Copying the UI process environment wholesale would expose unrelated secrets
+    such as the Flask signing key, root password, OpenAI key, and tunnel token to
+    every transient Spark job.
+    """
+    if source_type == "gold":
+        keys = {
+            "ICEBERG_CATALOG", "ICEBERG_METADATA_BUCKET", "SILVER_DATABASE",
+            "GOLD_DATABASE", "GOLD_DATA_BUCKET", "LAKE_DATABASE", "BRONZE_DATABASE",
+            "TRINO_HOST", "TRINO_PORT",
+        }
+        return {key: os.environ[key] for key in keys if key in os.environ}
+    keys = set(_COMMON_JOB_ENV_KEYS)
+    if source_type == "database":
+        keys.update(_DATABASE_JOB_ENV_KEYS)
+    elif source_type == "dhan":
+        keys.update(_DHAN_JOB_ENV_KEYS)
+    return {key: os.environ[key] for key in keys if key in os.environ}
+
+
+def _job_volumes(source_type: str = "") -> dict[str, dict[str, str]]:
+    volumes = {_VAULT_VOL: {"bind": "/vault/secrets", "mode": "ro"}}
+    if source_type == "dhan":
+        volumes[_DHAN_VOL] = {"bind": "/run/secrets", "mode": "rw"}
+        volumes[_DHAN_INSTRUMENT_VOL] = {"bind": "/var/cache/dhan", "mode": "rw"}
+    return volumes
 
 # ── Active jobs tracking ───────────────────────────────────────────────────────
 import threading as _threading
@@ -175,9 +257,14 @@ DO $$ BEGIN
         WHERE table_name='scheduled_jobs' AND column_name='oracle_table'
     ) THEN
         ALTER TABLE public.scheduled_jobs ADD COLUMN oracle_table   TEXT;
-        ALTER TABLE public.scheduled_jobs ADD COLUMN load_strategy  VARCHAR(50) DEFAULT 'append';
-        ALTER TABLE public.scheduled_jobs ADD COLUMN date_column    VARCHAR(100);
+        ALTER TABLE public.scheduled_jobs ADD COLUMN IF NOT EXISTS load_strategy VARCHAR(50) DEFAULT 'replace';
+        ALTER TABLE public.scheduled_jobs ADD COLUMN IF NOT EXISTS date_column VARCHAR(100);
     END IF;
+    -- Retain Oracle data for review; local Gold has its own destination.
+    ALTER TABLE public.scheduled_jobs ADD COLUMN IF NOT EXISTS gold_table TEXT;
+    ALTER TABLE public.scheduled_jobs ADD COLUMN IF NOT EXISTS load_strategy VARCHAR(50) DEFAULT 'replace';
+    ALTER TABLE public.scheduled_jobs ADD COLUMN IF NOT EXISTS date_column VARCHAR(100);
+    ALTER TABLE public.scheduled_jobs ALTER COLUMN load_strategy SET DEFAULT 'replace';
 END $$;
 """
 
@@ -187,7 +274,7 @@ def _trigger_scheduled_job(job_id: int) -> None:
     import docker as _docker
     from ui.db import get_fresh_conn
     from psycopg2.extras import RealDictCursor
-    run_date = datetime.date.today().isoformat()
+    run_date = scheduled_run_date(os.environ.get("SCHEDULER_TIMEZONE", "Asia/Kolkata"))
     conn   = None
     status = "error"
     logs   = ""
@@ -226,18 +313,18 @@ def _trigger_scheduled_job(job_id: int) -> None:
                 import boto3 as _boto3
                 from botocore.exceptions import ClientError as _CE
 
-                logs += "[silver] Ensuring MinIO bucket de-data-silver exists...\n"
+                logs += f"[silver] Ensuring MinIO bucket {SILVER_DATA_BUCKET} exists...\n"
                 _s3 = _boto3.client(
                     "s3",
                     endpoint_url=MINIO_ENDPOINT,
                     aws_access_key_id=MINIO_ACCESS_KEY,
                     aws_secret_access_key=MINIO_SECRET_KEY,
-                    region_name="us-east-1",
+                    region_name=MINIO_REGION,
                 )
                 try:
-                    _s3.head_bucket(Bucket="de-data-silver")
+                    _s3.head_bucket(Bucket=SILVER_DATA_BUCKET)
                 except _CE:
-                    _s3.create_bucket(Bucket="de-data-silver")
+                    _s3.create_bucket(Bucket=SILVER_DATA_BUCKET)
                     logs += "[silver] Bucket created.\n"
 
                 logs += "[silver] Writing DBT model file...\n"
@@ -270,37 +357,35 @@ def _trigger_scheduled_job(job_id: int) -> None:
                     status = "success"
 
                     # ── Chain Gold layer if oracle_table is configured ────────
-                    _oracle_table_raw = (job.get("oracle_table") or "").strip()
-                    if _oracle_table_raw:
+                    _gold_table = (job.get("gold_table") or "").strip()
+                    if not _gold_table and (job.get("oracle_table") or "").strip():
+                        logs += "[gold] Legacy Oracle destination was not run. Edit this schedule and choose a local Gold table to enable publishing.\n"
+                    if _gold_table:
                         _gold_key  = _register_active_job(app_name, run_date, "gold")
                         _gcont     = None
                         try:
-                            _oracle_tbl  = _oracle_table_raw if "." in _oracle_table_raw \
-                                           else f"dw_enigma.{_oracle_table_raw}"
-                            _load_strat  = (job.get("load_strategy") or "append").strip()
+                            _load_strat  = (job.get("load_strategy") or "replace").strip()
                             _date_col    = (job.get("date_column") or "").strip()
                             gold_args    = [
-                                "oracle-load",
+                                "gold-load",
                                 "--application-name", app_name,
                                 "--silver-table",     target_table,
-                                "--oracle-table",     _oracle_tbl,
+                                "--gold-table",       _gold_table,
                                 "--load-strategy",    _load_strat,
                                 "--run-date",         run_date,
                             ]
                             if _date_col:
                                 gold_args += ["--date-column", _date_col]
-                            logs += f"[gold] Launching Oracle load: {target_table} → {_oracle_tbl}\n"
+                            logs += f"[gold] Publishing local Gold: {target_table} -> {_gold_table}\n"
                             _gclient = _docker.DockerClient(
                                 base_url="unix:///var/run/docker.sock"
                             )
-                            _genv   = {k: v for k, v in os.environ.items()
-                                       if k not in _SKIP_ENV}
+                            _genv   = _job_environment("gold")
                             _gcont  = _gclient.containers.run(
                                 _PIPELINE_IMAGE,
                                 command=gold_args,
                                 environment=_genv,
                                 network=_COMPOSE_NETWORK,
-                                volumes={_VAULT_VOL: {"bind": "/vault/secrets", "mode": "ro"}},
                                 detach=True,
                                 remove=False,
                             )
@@ -309,10 +394,10 @@ def _trigger_scheduled_job(job_id: int) -> None:
                                 logs += _chunk.decode("utf-8", errors="replace")
                             _gresult = _gcont.wait()
                             if _gresult["StatusCode"] == 0:
-                                logs += "[gold] Oracle load completed successfully.\n"
+                                logs += "[gold] Publish completed successfully.\n"
                                 logs += "--- Gold Exit 0 ---\n"
                             else:
-                                logs   += f"[gold] Oracle load failed (exit {_gresult['StatusCode']}).\n"
+                                logs   += f"[gold] Publish failed (exit {_gresult['StatusCode']}).\n"
                                 logs   += "--- Gold Exit 1 ---\n"
                                 status  = "failed"
                         except Exception as _ge:
@@ -338,7 +423,7 @@ def _trigger_scheduled_job(job_id: int) -> None:
 
         write_mode = job["write_mode"] or "overwrite"
         client     = _docker.DockerClient(base_url="unix:///var/run/docker.sock")
-        env        = {k: v for k, v in os.environ.items() if k not in _SKIP_ENV}
+        env        = _job_environment(job["source_type"] or "s3")
 
         # ── Phase 1: Ingestion ─────────────────────────────────────────────────
         form_data = {
@@ -353,8 +438,8 @@ def _trigger_scheduled_job(job_id: int) -> None:
             "write_mode":        write_mode,
             "log_folder":        "lake",
             "log_level":         job["log_level"] or "INFO",
-            "output_catalog":    "minio",
-            "output_database":   "de_lake",
+            "output_catalog":    ICEBERG_CATALOG,
+            "output_database":   LAKE_DATABASE,
         }
         pipeline_args = _build_pipeline_args(form_data)
         ingest_key    = _register_active_job(app_name, run_date, "ingestion")
@@ -366,7 +451,7 @@ def _trigger_scheduled_job(job_id: int) -> None:
                 command=pipeline_args,
                 environment=env,
                 network=_COMPOSE_NETWORK,
-                volumes={_VAULT_VOL: {"bind": "/vault/secrets", "mode": "ro"}},
+                volumes=_job_volumes(job["source_type"] or "s3"),
                 detach=True,
                 remove=False,
             )
@@ -406,7 +491,7 @@ def _trigger_scheduled_job(job_id: int) -> None:
                     command=bronze_args,
                     environment=env,
                     network=_COMPOSE_NETWORK,
-                    volumes={_VAULT_VOL: {"bind": "/vault/secrets", "mode": "ro"}},
+                    volumes=_job_volumes(),
                     detach=True,
                     remove=False,
                 )
@@ -462,13 +547,21 @@ def _trigger_scheduled_job(job_id: int) -> None:
                     pass
 
 
-def _schedule_job(job_id: int, cron_expr: str) -> None:
+def _cron_trigger(cron_expr: str):
     parts = cron_expr.strip().split()
     if len(parts) != 5:
-        return
+        raise ValueError("Cron expression must contain five fields")
+    return CronTrigger(
+        minute=parts[0], hour=parts[1], day=parts[2], month=parts[3],
+        day_of_week=parts[4],
+        timezone=os.environ.get("SCHEDULER_TIMEZONE", "Asia/Kolkata"),
+    )
+
+
+def _schedule_job(job_id: int, cron_expr: str) -> None:
     _scheduler.add_job(
         _trigger_scheduled_job,
-        CronTrigger(minute=parts[0], hour=parts[1], day=parts[2], month=parts[3], day_of_week=parts[4], timezone="UTC"),
+        _cron_trigger(cron_expr),
         args=[job_id],
         id=f"sjob_{job_id}",
         replace_existing=True,
@@ -480,7 +573,7 @@ def _resolve_silver_macros(sql: str, snapshot_date: str = "") -> str:
 
     Strategies:
       {{ create_silver_table('t') }}          → CREATE OR REPLACE TABLE … WITH (…)
-      {{ append_silver_table('t') }}          → INSERT INTO minio.de_silver.t
+      {{ append_silver_table('t') }}          → INSERT INTO the configured Silver namespace
       {{ insert_overwrite_silver_table('t') }} → DELETE FROM … WHERE …;\n\nINSERT INTO …
       {{ get_snapshot_date() }}               → DATE 'YYYY-MM-DD' or CURRENT_DATE
     """
@@ -491,24 +584,24 @@ def _resolve_silver_macros(sql: str, snapshot_date: str = "") -> str:
     def _expand_create(m):
         t = m.group(1)
         return (
-            f"CREATE OR REPLACE TABLE minio.de_silver.{t}\n"
+            f"CREATE OR REPLACE TABLE {ICEBERG_CATALOG}.{SILVER_DATABASE}.{t}\n"
             f"WITH (\n"
             f"    format        = 'PARQUET',\n"
-            f"    location      = 's3://de-iceberg-warehouse-bucket/de_silver/{t}/',\n"
-            f"    data_location = 's3://de-data-silver/{t}/'\n"
+            f"    location      = 's3://{ICEBERG_METADATA_BUCKET}/{SILVER_DATABASE}/{t}/',\n"
+            f"    data_location = 's3://{SILVER_DATA_BUCKET}/{t}/'\n"
             f")"
         )
 
     def _expand_append(m):
         t = m.group(1)
-        return f"INSERT INTO minio.de_silver.{t}"
+        return f"INSERT INTO {ICEBERG_CATALOG}.{SILVER_DATABASE}.{t}"
 
     def _expand_insert_overwrite(m):
         t = m.group(1)
         return (
-            f"DELETE FROM minio.de_silver.{t}\n"
+            f"DELETE FROM {ICEBERG_CATALOG}.{SILVER_DATABASE}.{t}\n"
             f"WHERE snapshot_date = {resolved_date};\n\n"
-            f"INSERT INTO minio.de_silver.{t}"
+            f"INSERT INTO {ICEBERG_CATALOG}.{SILVER_DATABASE}.{t}"
         )
 
     sql = _re.sub(r"\{\{\s*create_silver_table\(\s*['\"]([^'\"]+)['\"]\s*\)\s*\}\}", _expand_create, sql)
@@ -534,13 +627,17 @@ def _build_bronze_args(form) -> list[str]:
 
 def _build_pipeline_args(form) -> list[str]:
     source_type = form.get("source_type", "s3")
+    if source_type == "dhan":
+        form = dhan_snapshot_form(form)
+    elif source_type not in {"s3", "database"}:
+        raise ValueError("Choose a supported ingestion source.")
     args = [
         "--application-name", form["application_name"],
         "--source-type",      source_type,
         "--ingest-date",      form["ingest_date"],
         "--metadata-key",     form["metadata_key"],
         "--output-database",  form["output_database"],
-        "--output-catalog",   form.get("output_catalog", "minio"),
+        "--output-catalog",   form.get("output_catalog", ICEBERG_CATALOG),
         "--write-mode",       form.get("write_mode", "overwrite"),
         "--log-folder",       form.get("log_folder", "lake"),
         "--log-level",        form.get("log_level", "INFO"),
@@ -549,16 +646,95 @@ def _build_pipeline_args(form) -> list[str]:
     if source_type == "s3":
         args += ["--source-bucket", form["source_bucket"],
                  "--source-key",    form["source_key"]]
-    else:
+    elif source_type == "database":
         args += ["--source-database",   form["source_database"],
                  "--source-table-name", form["source_table_name"]]
+    elif source_type == "dhan":
+        args += ["--dhan-mode", form["dhan_snapshot_mode"],
+                 "--dhan-instruments", form["dhan_instruments"]]
     return args
+
+
+@app.route("/health")
+def health():
+    return jsonify({"status": "ok"})
 
 
 @app.route("/")
 @login_required
 def index():
-    return render_template("index.html")
+    return render_template(
+        "index.html", iceberg_catalog=ICEBERG_CATALOG, lake_database=LAKE_DATABASE,
+        bronze_database=BRONZE_DATABASE, silver_database=SILVER_DATABASE,
+        gold_database=GOLD_DATABASE, trading_date=india_date(), trading_timezone="Asia/Kolkata",
+        dhan_symbols="",
+    )
+
+
+@app.route("/dhan/status")
+@login_required
+def dhan_status():
+    try:
+        result = inspect_dhan_setup()
+    except Exception:
+        # Neither local parsing errors nor token-file exceptions may expose secrets.
+        result = inspect_dhan_setup({})
+        result["message"] = "Local Dhan settings could not be inspected. Review the server configuration."
+    response = jsonify(result)
+    response.headers["Cache-Control"] = "no-store, private"
+    response.headers["Pragma"] = "no-cache"
+    return response
+
+
+@app.route("/dhan/resolve", methods=["POST"])
+@login_required
+@limiter.limit("20 per minute")
+def dhan_resolve():
+    """Resolve an explicit symbol request using public data, never brokerage auth."""
+    status = 200
+    try:
+        payload = request.get_json(silent=True) if request.is_json else request.form
+        if payload is None or (request.is_json and not isinstance(payload, dict)):
+            raise ValueError("Invalid symbol request")
+        reject_dhan_credentials(payload)
+        symbols = payload.get("symbols", "")
+        if not isinstance(symbols, str):
+            raise ValueError("Invalid symbols")
+        symbols = symbols.strip()
+        if not symbols:
+            symbols, _ = configured_dhan_selection(
+                symbols=os.environ.get("DHAN_SYMBOLS", ""),
+                instruments=os.environ.get("DHAN_INSTRUMENTS", ""),
+                symbols_file=os.environ.get("DHAN_SYMBOLS_FILE", ""),
+                max_instruments=1000,
+            )
+        requested = parse_dhan_symbols(symbols, max_instruments=1000)
+        resolved = resolve_dhan_selection(symbols=symbols, max_instruments=1000)
+        if len(requested) != len(resolved):
+            raise ValueError("Invalid resolution count")
+        result = {
+            "count": len(resolved),
+            "instruments": [
+                {"symbol": item.symbol, "exchange_segment": instrument.exchange_segment,
+                 "security_id": instrument.security_id}
+                for item, instrument in zip(requested, resolved)
+            ],
+            "message": "Symbols resolved using the official Dhan instrument list. Market-data access has not been verified.",
+        }
+    except DhanInstrumentError as exc:
+        status = 503 if exc.code == "master_unavailable" else 400
+        result = {"code": exc.code, "error": str(exc)}
+    except ValueError:
+        status = 400
+        result = {"code": "invalid_symbols", "error": "Enter valid symbols only. Credentials must remain on the server."}
+    except Exception:
+        status = 503
+        result = {"code": "master_unavailable", "error": "The official Dhan instrument list is unavailable. Try again later."}
+    response = jsonify(result)
+    response.status_code = status
+    response.headers["Cache-Control"] = "no-store, private"
+    response.headers["Pragma"] = "no-cache"
+    return response
 
 
 @app.route("/active-jobs")
@@ -606,6 +782,7 @@ def connectivity():
             endpoint_url=MINIO_ENDPOINT,
             aws_access_key_id=MINIO_ACCESS_KEY,
             aws_secret_access_key=MINIO_SECRET_KEY,
+            region_name=MINIO_REGION,
         )
         client.list_buckets()
         results["minio"] = "ok"
@@ -614,7 +791,7 @@ def connectivity():
 
     try:
         r = _req.get(f"{VAULT_ADDR}/v1/sys/health", timeout=3)
-        results["vault"] = "ok" if r.status_code in (200, 429, 503) else f"error: HTTP {r.status_code}"
+        results["vault"] = "ok" if r.status_code in (200, 429) else f"error: HTTP {r.status_code}"
     except Exception as exc:
         results["vault"] = f"error: {exc}"
 
@@ -624,8 +801,16 @@ def connectivity():
 @app.route("/run", methods=["POST"])
 @login_required
 def run():
-    form_data     = request.form
-    pipeline_args = _build_pipeline_args(form_data)
+    try:
+        form_data = dhan_snapshot_form(request.form) if request.form.get("source_type") == "dhan" else request.form
+        pipeline_args = _build_pipeline_args(form_data)
+    except DhanInstrumentError as exc:
+        return jsonify({"code": exc.code, "error": str(exc)}), (503 if exc.code == "master_unavailable" else 400)
+    except (ValueError, KeyError):
+        message = "Invalid or incomplete ingestion settings."
+        if request.form.get("source_type") == "dhan":
+            message = "Dhan snapshot settings are incomplete or invalid. Check setup status, today's India date, and the selected instruments/mode. Credentials must remain on the server."
+        return jsonify({"error": message}), 400
     app_name      = form_data.get("application_name", "")
     run_date      = form_data.get("ingest_date", "")
     write_mode    = form_data.get("write_mode", "overwrite")
@@ -640,13 +825,18 @@ def run():
         ingestion_exit = -1
         try:
             client = _docker.DockerClient(base_url="unix:///var/run/docker.sock")
-            env = {k: v for k, v in os.environ.items() if k not in _SKIP_ENV}
+            env = _job_environment(form_data.get("source_type", "s3"))
+            if form_data.get("source_type") == "dhan":
+                # The web request already resolved symbols. Canonical IDs must
+                # not conflict with the UI's inherited symbol defaults in a job.
+                env.update(DHAN_SYMBOLS="", DHAN_SYMBOLS_FILE="",
+                           DHAN_INSTRUMENTS=form_data["dhan_instruments"])
             container = client.containers.run(
                 _PIPELINE_IMAGE,
                 command=pipeline_args,
                 environment=env,
                 network=_COMPOSE_NETWORK,
-                volumes={_VAULT_VOL: {"bind": "/vault/secrets", "mode": "ro"}},
+                volumes=_job_volumes(form_data.get("source_type", "s3")),
                 detach=True,
                 remove=False,
             )
@@ -683,13 +873,13 @@ def run():
             try:
                 yield f"\n--- BRONZE AUTO-TRIGGER run_type={bronze_run_type} ---\n"
                 client = _docker.DockerClient(base_url="unix:///var/run/docker.sock")
-                env = {k: v for k, v in os.environ.items() if k not in _SKIP_ENV}
+                env = _job_environment()
                 bronze_container = client.containers.run(
                     _PIPELINE_IMAGE,
                     command=bronze_args,
                     environment=env,
                     network=_COMPOSE_NETWORK,
-                    volumes={_VAULT_VOL: {"bind": "/vault/secrets", "mode": "ro"}},
+                    volumes=_job_volumes(),
                     detach=True,
                     remove=False,
                 )
@@ -733,7 +923,7 @@ def run():
                 else:
                     _remove_active_job(bronze_key)
 
-    return Response(stream_with_context(generate()), mimetype="text/plain")
+    return Response(background_job_stream(generate), mimetype="text/plain")
 
 
 @app.route("/run-bronze", methods=["POST"])
@@ -746,14 +936,14 @@ def run_bronze():
         container = None
         try:
             client = _docker.DockerClient(base_url="unix:///var/run/docker.sock")
-            env = {k: v for k, v in os.environ.items() if k not in _SKIP_ENV}
+            env = _job_environment()
 
             container = client.containers.run(
                 _PIPELINE_IMAGE,
                 command=bronze_args,
                 environment=env,
                 network=_COMPOSE_NETWORK,
-                volumes={_VAULT_VOL: {"bind": "/vault/secrets", "mode": "ro"}},
+                volumes=_job_volumes(),
                 detach=True,
                 remove=False,
             )
@@ -773,7 +963,7 @@ def run_bronze():
                 except Exception:
                     pass
 
-    return Response(stream_with_context(generate()), mimetype="text/plain")
+    return Response(background_job_stream(generate), mimetype="text/plain")
 
 
 @app.route("/list-bucket-keys")
@@ -789,6 +979,7 @@ def list_bucket_keys():
         endpoint_url=(SOURCE_S3_ENDPOINT or "").strip(),
         aws_access_key_id=SOURCE_S3_ACCESS_KEY,
         aws_secret_access_key=SOURCE_S3_SECRET_KEY,
+        region_name=SOURCE_S3_REGION,
     )
     try:
         resp = client.list_objects_v2(Bucket=bucket, Prefix=prefix, MaxKeys=500)
@@ -808,6 +999,7 @@ def list_metadata_keys():
         endpoint_url=MINIO_ENDPOINT,
         aws_access_key_id=MINIO_ACCESS_KEY,
         aws_secret_access_key=MINIO_SECRET_KEY,
+        region_name=MINIO_REGION,
     )
     try:
         resp = client.list_objects_v2(Bucket=meta_bucket, MaxKeys=500)
@@ -830,6 +1022,7 @@ def metadata_preview():
         endpoint_url=MINIO_ENDPOINT,
         aws_access_key_id=MINIO_ACCESS_KEY,
         aws_secret_access_key=MINIO_SECRET_KEY,
+        region_name=MINIO_REGION,
     )
     try:
         obj     = client.get_object(Bucket=meta_bucket, Key=key)
@@ -858,6 +1051,7 @@ def log_history():
         endpoint_url=MINIO_ENDPOINT,
         aws_access_key_id=MINIO_ACCESS_KEY,
         aws_secret_access_key=MINIO_SECRET_KEY,
+        region_name=MINIO_REGION,
     )
     try:
         resp    = client.list_objects_v2(Bucket=LOG_S3_BUCKET, Prefix=f"{log_folder}/{app_name}/")
@@ -901,6 +1095,7 @@ def view_log():
         endpoint_url=MINIO_ENDPOINT,
         aws_access_key_id=MINIO_ACCESS_KEY,
         aws_secret_access_key=MINIO_SECRET_KEY,
+        region_name=MINIO_REGION,
     )
     buf = io.BytesIO()
     client.download_fileobj(LOG_S3_BUCKET, key, buf)
@@ -931,6 +1126,7 @@ def download_log():
         endpoint_url=MINIO_ENDPOINT,
         aws_access_key_id=MINIO_ACCESS_KEY,
         aws_secret_access_key=MINIO_SECRET_KEY,
+        region_name=MINIO_REGION,
     )
 
     s3_key   = _find_log_key(client, app_name, ingest_date, log_folder)
@@ -963,72 +1159,22 @@ def list_scheduled_jobs():
 
 
 def _fqn_to_dbt_ref(fqn: str) -> str:
-    """Convert a Trino FQN to the appropriate DBT jinja reference.
+    """Quote a runtime-selected Trino table without requiring a dbt registration.
 
-    minio.de_bronze.X  → {{ source('de_bronze', 'X') }}
-    minio.de_silver.X  → {{ ref('X') }}
-    minio.<schema>.X   → {{ source('<schema>', 'X') }}
-    anything else      → kept as-is
+    The browser can select tables created outside this dbt project. A ref/source
+    would incorrectly require a matching model or YAML declaration at parse time.
     """
+    if not isinstance(fqn, str):
+        raise ValueError("Source table must be a three-part catalog.schema.table name")
     parts = fqn.strip().split(".")
-    if len(parts) == 3 and parts[0].lower() == "minio":
-        schema, table = parts[1], parts[2]
-        if schema.lower() == "de_silver":
-            return f"{{{{ ref('{table}') }}}}"
-        return f"{{{{ source('{schema}', '{table}') }}}}"
-    return fqn
+    if len(parts) != 3:
+        raise ValueError("Source table must be a three-part catalog.schema.table name")
+    return ".".join(f'"{validate_sql_identifier(part)}"' for part in parts)
 
 
 def _overwrite_silver_cleanup(target_table: str) -> list:
-    """For overwrite strategy: drop Iceberg table from Trino and clear both S3 paths.
-    Returns a list of log lines so callers can stream them."""
-    import boto3 as _boto3
-    import trino  as _trino
-
-    logs = []
-
-    # 1. Drop Iceberg table from Trino/HMS so the S3 location is unregistered
-    try:
-        conn = _trino.dbapi.connect(
-            host    = os.environ.get("TRINO_HOST", "trino"),
-            port    = int(os.environ.get("TRINO_PORT", 8080)),
-            user    = "admin",
-            catalog = "minio",
-            schema  = "de_silver",
-        )
-        cur = conn.cursor()
-        cur.execute(f"DROP TABLE IF EXISTS minio.de_silver.{target_table}")
-        cur.fetchall()
-        conn.close()
-        logs.append(f"[silver] Dropped Iceberg table minio.de_silver.{target_table} (if existed).\n")
-    except Exception as exc:
-        logs.append(f"[silver] Warning: could not drop table from Trino: {exc}\n")
-
-    # 2. Clear S3 data and metadata paths so the CREATE TABLE finds empty locations
-    s3 = _boto3.client(
-        "s3",
-        endpoint_url         = MINIO_ENDPOINT,
-        aws_access_key_id    = MINIO_ACCESS_KEY,
-        aws_secret_access_key= MINIO_SECRET_KEY,
-        region_name          = "us-east-1",
-    )
-    for bucket, prefix in [
-        ("de-data-silver",               f"{target_table}/"),
-        ("de-iceberg-warehouse-bucket",  f"de_silver/{target_table}/"),
-    ]:
-        try:
-            paginator = s3.get_paginator("list_objects_v2")
-            deleted = 0
-            for page in paginator.paginate(Bucket=bucket, Prefix=prefix):
-                objects = [{"Key": o["Key"]} for o in page.get("Contents", [])]
-                if objects:
-                    s3.delete_objects(Bucket=bucket, Delete={"Objects": objects})
-                    deleted += len(objects)
-            logs.append(f"[silver] Cleared s3://{bucket}/{prefix} ({deleted} objects deleted).\n")
-        except Exception as exc:
-            logs.append(f"[silver] Warning: could not clear s3://{bucket}/{prefix}: {exc}\n")
-
-    return logs
+    """Preserve snapshots; dbt performs atomic Iceberg replacement."""
+    return [f"[silver] Existing {target_table} data is retained until replacement commits.\n"]
 
 
 def _ensure_silver_sources(model_sql: str, project_root: str) -> None:
@@ -1062,10 +1208,10 @@ def _ensure_silver_sources(model_sql: str, project_root: str) -> None:
     changed = False
     for src_name, table_name in sorted(refs):
         if src_name not in src_by_name:
-            # source name is the schema name (e.g. de_bronze), database is minio
+            # Source name is the schema name; database is the configured catalog.
             entry = {
                 "name":     src_name,
-                "database": "minio",
+                "database": ICEBERG_CATALOG,
                 "schema":   src_name,
                 "tables":   [],
             }
@@ -1087,6 +1233,7 @@ def _ensure_silver_sources(model_sql: str, project_root: str) -> None:
 def _write_silver_dbt_model(silver_payload_json: str, app_name: str) -> str:
     """Parse a saved silver_payload, write a proper DBT model .sql file, return target_table."""
     import json as _json
+    import re as _re
 
     payload       = _json.loads(silver_payload_json)
     target_table  = (payload.get("target_table") or app_name).strip()
@@ -1097,24 +1244,27 @@ def _write_silver_dbt_model(silver_payload_json: str, app_name: str) -> str:
 
     if not sources or not target_table:
         raise ValueError("silver_payload missing sources or target_table")
+    if not _re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", target_table):
+        raise ValueError("target_table must be a simple SQL identifier")
 
     # Map silver strategy to DBT materialization
     _MAT = {
-        "overwrite":        ("table",       {}),
+        "overwrite":        ("table",       {"on_table_exists": "'replace'"}),
         "append":           ("incremental", {"incremental_strategy": "'append'"}),
         "insert_overwrite": ("incremental", {"incremental_strategy": "'delete+insert'",
                                              "unique_key":           "'snapshot_date'"}),
     }
-    mat, extra_cfg = _MAT.get(strategy, ("table", {}))
+    if strategy not in _MAT:
+        raise ValueError(f"Unsupported Silver strategy: {strategy}")
+    mat, extra_cfg = _MAT[strategy]
 
     # Iceberg table properties: data and metadata in separate buckets.
     iceberg_props = (
         f"    properties={{\n"
         f"        \"format\":        \"'PARQUET'\",\n"
-        f"        \"location\":      \"'s3://de-iceberg-warehouse-bucket/de_silver/{target_table}/'\",\n"
-        f"        \"data_location\": \"'s3://de-data-silver/{target_table}/'\"\n"
+        f"        \"location\":      \"'s3://{ICEBERG_METADATA_BUCKET}/{SILVER_DATABASE}/{target_table}/'\",\n"
+        f"        \"data_location\": \"'s3://{SILVER_DATA_BUCKET}/{target_table}/'\"\n"
         f"    }},\n"
-        if mat == "table" else ""
     )
     extra_cfg_str = "".join(f"    {k}={v},\n" for k, v in extra_cfg.items())
 
@@ -1138,7 +1288,7 @@ def _write_silver_dbt_model(silver_payload_json: str, app_name: str) -> str:
             select_parts.append(f"    {expr} AS {target}")
     select_clause = ",\n".join(select_parts) if select_parts else "    *"
 
-    # Build FROM clause converting raw Trino FQNs to DBT jinja refs
+    # Runtime-selected tables are quoted directly, without dbt model dependencies.
     first     = sources[0]
     alias     = (first.get("alias") or "src").strip()
     from_ref  = _fqn_to_dbt_ref(first.get("fqn", ""))
@@ -1206,20 +1356,35 @@ def create_scheduled_job():
     layer_type     = data.get("layer_type", "ingestion").strip() or "ingestion"
     silver_sql     = data.get("silver_sql") or None
     silver_payload = data.get("silver_payload") or None
-    oracle_table   = (data.get("oracle_table") or "").strip() or None
-    load_strategy  = (data.get("load_strategy") or "append").strip()
+    gold_table     = (data.get("gold_table") or "").strip() or None
+    load_strategy  = (data.get("load_strategy") or "replace").strip()
     date_column    = (data.get("date_column") or "").strip() or None
+
+    if data.get("source_type") == "dhan":
+        return jsonify({"error": "Dhan snapshots are currently manual UI runs. Use the CLI/Compose guide for unattended scheduling."}), 400
 
     if not app_name:
         return jsonify({"error": "application_name is required"}), 400
     if layer_type == "silver" and not silver_sql:
         return jsonify({"error": "silver_sql is required for silver layer jobs"}), 400
+    if data.get("oracle_table"):
+        return jsonify({"error": "Oracle schedules are retired. Choose gold_table for local Iceberg Gold."}), 400
+    try:
+        if gold_table:
+            resolve_tables("validation_source", gold_table, GoldConfig.from_env())
+        if load_strategy not in {"replace", "append", "delete_and_insert"}:
+            raise ValueError("Invalid local Gold load strategy")
+        if gold_table and load_strategy == "delete_and_insert" and not date_column:
+            raise ValueError("date_column is required for date replacement")
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
 
-    # Validate cron
-    import re as _re
+    # Validate field values before saving a row that startup will later load.
     cron = (data.get("cron_expression") or "").strip()
-    if not _re.match(r'^(\S+\s+){4}\S+$', cron):
-        return jsonify({"error": "Invalid cron expression (need 5 fields: min hour day month weekday)"}), 400
+    try:
+        _cron_trigger(cron)
+    except (TypeError, ValueError):
+        return jsonify({"error": "Invalid cron expression (min hour day month weekday)"}), 400
 
     conn = get_conn()
     with conn.cursor(cursor_factory=RealDictCursor) as cur:
@@ -1231,7 +1396,7 @@ def create_scheduled_job():
                (application_name, cron_expression, source_type, source_bucket, source_key,
                 source_database, source_table_name, metadata_key, write_mode, log_level,
                 layer_type, silver_sql, silver_payload,
-                oracle_table, load_strategy, date_column, is_active)
+                gold_table, load_strategy, date_column, is_active)
                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s, TRUE)
                ON CONFLICT (application_name, layer_type) DO UPDATE SET
                    cron_expression   = EXCLUDED.cron_expression,
@@ -1245,7 +1410,7 @@ def create_scheduled_job():
                    log_level         = EXCLUDED.log_level,
                    silver_sql        = EXCLUDED.silver_sql,
                    silver_payload    = EXCLUDED.silver_payload,
-                   oracle_table      = EXCLUDED.oracle_table,
+                   gold_table        = EXCLUDED.gold_table,
                    load_strategy     = EXCLUDED.load_strategy,
                    date_column       = EXCLUDED.date_column,
                    is_active         = TRUE
@@ -1258,7 +1423,7 @@ def create_scheduled_job():
                 data.get("metadata_key") or None,
                 data.get("write_mode", "overwrite"), data.get("log_level", "INFO"),
                 layer_type, silver_sql, silver_payload,
-                oracle_table, load_strategy, date_column,
+                gold_table, load_strategy, date_column,
             ),
         )
         job_id = cur.fetchone()["id"]
@@ -1341,13 +1506,20 @@ def _build_silver_args(form) -> list[str]:
     return args
 
 
-def _build_oracle_args(form) -> list[str]:
+def _build_gold_args(form) -> list[str]:
+    resolve_tables(form["silver_table"], form["gold_table"], GoldConfig.from_env())
+    validate_gold_run_date(form["run_date"])
+    strategy = form.get("load_strategy", "replace")
+    if strategy not in {"replace", "append", "delete_and_insert"}:
+        raise ValueError("Invalid local Gold load strategy")
+    if strategy == "delete_and_insert" and not form.get("date_column"):
+        raise ValueError("date_column is required for date replacement")
     args = [
-        "oracle-load",
+        "gold-load",
         "--application-name", form["application_name"],
         "--silver-table",     form["silver_table"],
-        "--oracle-table",     form["oracle_table"],
-        "--load-strategy",    form["load_strategy"],
+        "--gold-table",       form["gold_table"],
+        "--load-strategy",    strategy,
         "--run-date",         form["run_date"],
     ]
     if form.get("date_column"):
@@ -1365,9 +1537,9 @@ def silver_check_table():
 
     parts = table_input.split(".")
     if len(parts) == 1:
-        catalog, schema, tbl = "minio", "de_bronze", parts[0]
+        catalog, schema, tbl = ICEBERG_CATALOG, BRONZE_DATABASE, parts[0]
     elif len(parts) == 2:
-        catalog, schema, tbl = "minio", parts[0], parts[1]
+        catalog, schema, tbl = ICEBERG_CATALOG, parts[0], parts[1]
     else:
         catalog, schema, tbl = parts[0], parts[1], parts[2]
     fqn = f"{catalog}.{schema}.{tbl}"
@@ -1552,7 +1724,7 @@ def silver_flowchart_from_sql():
         "lines=[each column as 'sql_expression → target_column'; show up to 8, "
         "then add '+ N more' as the final entry if truncated]. "
         "Omit this node only if the SELECT clause is literally SELECT *.\n"
-        "- One 'target' node: label=target table name, sublabel='minio.de_silver', lines=[].\n"
+        f"- One 'target' node: label=target table name, sublabel='{ICEBERG_CATALOG}.{SILVER_DATABASE}', lines=[].\n"
         "- Edge direction: each source feeds its join node; join nodes chain left-to-right; "
         "the last join (or sources if no joins) feeds transform (if present), then target.\n"
         "- 'lines' must always be a JSON array (use [] when empty).\n"
@@ -1608,15 +1780,15 @@ def silver_run_transform():
         key = _register_active_job(app_name, run_date, "silver")
         try:
             # ── Step 1: ensure MinIO buckets exist ───────────────
-            yield "[silver] Ensuring MinIO bucket de-data-silver exists...\n"
+            yield f"[silver] Ensuring MinIO bucket {SILVER_DATA_BUCKET} exists...\n"
             _s3 = _boto3.client(
                 "s3",
                 endpoint_url=MINIO_ENDPOINT,
                 aws_access_key_id=MINIO_ACCESS_KEY,
                 aws_secret_access_key=MINIO_SECRET_KEY,
-                region_name="us-east-1",
+                region_name=MINIO_REGION,
             )
-            for _bkt in ("de-data-silver", "de-iceberg-warehouse-bucket"):
+            for _bkt in (SILVER_DATA_BUCKET, ICEBERG_METADATA_BUCKET):
                 try:
                     _s3.head_bucket(Bucket=_bkt)
                     yield f"[silver] Bucket '{_bkt}' OK.\n"
@@ -1643,16 +1815,14 @@ def silver_run_transform():
             yield f"[silver] Materialization : {_mat_label}\n"
             yield f"[silver] Source tables   : {_sources_count}\n"
             yield f"[silver] Mapped columns  : {_cols_count}\n"
-            yield f"[silver] Target table    : minio.de_silver.{target_table}\n"
-            yield f"[silver] Data location   : s3://de-data-silver/{target_table}/\n"
-            yield f"[silver] Meta location   : s3://de-iceberg-warehouse-bucket/de_silver/{target_table}/\n"
+            yield f"[silver] Target table    : {ICEBERG_CATALOG}.{SILVER_DATABASE}.{target_table}\n"
+            yield f"[silver] Data location   : s3://{SILVER_DATA_BUCKET}/{target_table}/\n"
+            yield f"[silver] Meta location   : s3://{ICEBERG_METADATA_BUCKET}/{SILVER_DATABASE}/{target_table}/\n"
 
-            # ── Step 4: overwrite cleanup (drop + clear S3) ──────
+            # Preserve the previous snapshot until replacement commits.
             if _strategy == "overwrite":
-                yield "[silver] Overwrite strategy — clearing existing table and S3 paths...\n"
                 for _log_line in _overwrite_silver_cleanup(target_table):
                     yield _log_line
-                yield "[silver] Cleanup complete — ready to write fresh Iceberg table.\n"
 
             # ── Step 5: run dbt ──────────────────────────────────
             project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
@@ -1696,15 +1866,17 @@ def silver_run_transform():
                     host    = os.environ.get("TRINO_HOST", "trino"),
                     port    = int(os.environ.get("TRINO_PORT", 8080)),
                     user    = "admin",
-                    catalog = "minio",
-                    schema  = "de_silver",
+                    catalog = ICEBERG_CATALOG,
+                    schema  = SILVER_DATABASE,
                 )
                 _cur = _conn.cursor()
-                _cur.execute(f"SELECT COUNT(*) FROM minio.de_silver.{target_table}")
+                _cur.execute(
+                    f"SELECT COUNT(*) FROM {ICEBERG_CATALOG}.{SILVER_DATABASE}.{target_table}"
+                )
                 _row = _cur.fetchone()
                 _conn.close()
                 _count = _row[0] if _row else 0
-                yield f"[silver] Row count verified: {_count:,} rows in de_silver.{target_table}.\n"
+                yield f"[silver] Row count verified: {_count:,} rows in {SILVER_DATABASE}.{target_table}.\n"
             except Exception as _ve:
                 yield f"[silver] Warning: row count query failed — {_ve}\n"
 
@@ -1716,7 +1888,7 @@ def silver_run_transform():
         finally:
             _remove_active_job(key)
 
-    return Response(stream_with_context(generate()), mimetype="text/plain")
+    return Response(background_job_stream(generate), mimetype="text/plain")
 
 
 @app.route("/run-silver", methods=["POST"])
@@ -1732,13 +1904,13 @@ def run_silver():
         container  = None
         try:
             client    = _docker.DockerClient(base_url="unix:///var/run/docker.sock")
-            env       = {k: v for k, v in os.environ.items() if k not in _SKIP_ENV}
+            env       = _job_environment()
             container = client.containers.run(
                 _PIPELINE_IMAGE,
                 command=silver_args,
                 environment=env,
                 network=_COMPOSE_NETWORK,
-                volumes={_VAULT_VOL: {"bind": "/vault/secrets", "mode": "ro"}},
+                volumes=_job_volumes(),
                 detach=True,
                 remove=False,
             )
@@ -1757,48 +1929,56 @@ def run_silver():
                 except Exception:
                     pass
 
-    return Response(stream_with_context(generate()), mimetype="text/plain")
+    return Response(background_job_stream(generate), mimetype="text/plain")
 
 
 @app.route("/run-oracle", methods=["POST"])
 @login_required
 def run_oracle():
-    oracle_args = _build_oracle_args(request.form)
+    return jsonify({"error": "Oracle publishing is retired. Use /run-gold with a local Iceberg Gold table."}), 410
+
+
+@app.route("/run-gold", methods=["POST"])
+@login_required
+def run_gold():
+    try:
+        gold_args = _build_gold_args(request.form)
+    except (ValueError, KeyError) as exc:
+        return jsonify({"error": str(exc)}), 400
     app_name    = request.form.get("application_name", "")
     run_date    = request.form.get("run_date", "")
 
     def generate():
         import docker as _docker
-        oracle_key = _register_active_job(app_name, run_date, "gold")
+        gold_key = _register_active_job(app_name, run_date, "gold")
         container  = None
         try:
             client    = _docker.DockerClient(base_url="unix:///var/run/docker.sock")
-            env       = {k: v for k, v in os.environ.items() if k not in _SKIP_ENV}
+            env       = _job_environment("gold")
             container = client.containers.run(
                 _PIPELINE_IMAGE,
-                command=oracle_args,
+                command=gold_args,
                 environment=env,
                 network=_COMPOSE_NETWORK,
-                volumes={_VAULT_VOL: {"bind": "/vault/secrets", "mode": "ro"}},
                 detach=True,
                 remove=False,
             )
-            _set_job_container(oracle_key, container.id)
+            _set_job_container(gold_key, container.id)
             for chunk in container.logs(stream=True, follow=True):
                 yield chunk.decode("utf-8", errors="replace")
             result = container.wait()
-            yield f"\n--- Oracle Load Exit {result['StatusCode']} ---\n"
+            yield f"\n--- Gold Exit {result['StatusCode']} ---\n"
         except Exception as exc:
-            yield f"\nERROR launching oracle-load container: {exc}\n"
+            yield f"\n[gold] ERROR launching local Gold container: {exc}\n--- Gold Exit 1 ---\n"
         finally:
-            _remove_active_job(oracle_key)
+            _remove_active_job(gold_key)
             if container:
                 try:
                     container.remove(force=True)
                 except Exception:
                     pass
 
-    return Response(stream_with_context(generate()), mimetype="text/plain")
+    return Response(background_job_stream(generate), mimetype="text/plain")
 
 
 @app.route("/run-transform-load", methods=["POST"])
@@ -1809,19 +1989,30 @@ def run_transform_load():
     app_name        = (data.get("app_name") or "transform_load").strip()
     run_date        = (data.get("run_date") or "").strip()
     silver_table    = (data.get("silver_table") or "").strip()
-    oracle_table    = (data.get("oracle_table") or "").strip()
-    load_strategy   = (data.get("load_strategy") or "append").strip()
+    gold_table      = (data.get("gold_table") or "").strip()
+    load_strategy   = (data.get("load_strategy") or "replace").strip()
     date_column     = (data.get("date_column") or "").strip()
 
     if not silver_payload:
         return jsonify({"error": "silver_payload is required"}), 400
     if not silver_table:
         return jsonify({"error": "silver_table is required"}), 400
-    if not oracle_table:
-        return jsonify({"error": "oracle_table is required"}), 400
+    if not gold_table:
+        return jsonify({"error": "gold_table is required"}), 400
 
-    silver_table = silver_table.split(".")[-1]
-    oracle_table = oracle_table if "." in oracle_table else f"dw_enigma.{oracle_table}"
+    effective_date = run_date or scheduled_run_date(os.environ.get("SCHEDULER_TIMEZONE", "Asia/Kolkata"))
+    run_date = effective_date
+    try:
+        gold_args = _build_gold_args({
+            "application_name": app_name, "silver_table": silver_table,
+            "gold_table": gold_table, "load_strategy": load_strategy,
+            "run_date": effective_date, "date_column": date_column,
+        })
+        payload_target = (json.loads(silver_payload).get("target_table") or app_name).strip()
+        if payload_target != silver_table.split(".")[-1]:
+            raise ValueError("silver_table must match the Silver payload target_table")
+    except (ValueError, TypeError, AttributeError) as exc:
+        return jsonify({"error": str(exc)}), 400
 
     def generate_with_cleanup():
         import subprocess as _sp
@@ -1834,18 +2025,18 @@ def run_transform_load():
         phase1_ok     = [False]
         try:
             # ── Phase 1: Silver via DBT ────────────────────────────────
-            yield "[silver] Ensuring MinIO bucket de-data-silver exists...\n"
+            yield f"[silver] Ensuring MinIO bucket {SILVER_DATA_BUCKET} exists...\n"
             _s3 = _boto3.client(
                 "s3",
                 endpoint_url=MINIO_ENDPOINT,
                 aws_access_key_id=MINIO_ACCESS_KEY,
                 aws_secret_access_key=MINIO_SECRET_KEY,
-                region_name="us-east-1",
+                region_name=MINIO_REGION,
             )
             try:
-                _s3.head_bucket(Bucket="de-data-silver")
+                _s3.head_bucket(Bucket=SILVER_DATA_BUCKET)
             except _CE:
-                _s3.create_bucket(Bucket="de-data-silver")
+                _s3.create_bucket(Bucket=SILVER_DATA_BUCKET)
                 yield "[silver] Bucket created.\n"
 
             yield "[silver] Writing DBT model file...\n"
@@ -1855,7 +2046,7 @@ def run_transform_load():
             import json as _json
             _strategy = (_json.loads(silver_payload).get("strategy") or "overwrite").strip()
             if _strategy == "overwrite":
-                yield "[silver] Overwrite strategy — clearing existing table and S3 paths...\n"
+                yield "[silver] Preparing atomic replacement; existing data remains available until commit.\n"
                 for _log_line in _overwrite_silver_cleanup(target_table):
                     yield _log_line
 
@@ -1884,6 +2075,7 @@ def run_transform_load():
             if proc.returncode != 0:
                 yield f"[silver] DBT run failed (exit {proc.returncode}).\n"
                 yield "\n--- Silver Exit 1 ---\n"
+                _remove_active_job(key)
                 return
 
             yield "[silver] DBT run completed successfully.\n"
@@ -1893,30 +2085,17 @@ def run_transform_load():
         except Exception as exc:
             yield f"\n[silver] ERROR: {exc}\n--- Silver Exit 1 ---\n"
 
-        # ── Phase 2: Gold (Oracle) — only if Phase 1 succeeded ─────
+        # Phase 2: publish local Iceberg Gold only after Silver succeeds.
         if phase1_ok[0]:
             try:
-                effective_date = run_date or str(__import__('datetime').date.today())
-                oracle_args = [
-                    "oracle-load",
-                    "--application-name", app_name,
-                    "--silver-table",     silver_table,
-                    "--oracle-table",     oracle_table,
-                    "--load-strategy",    load_strategy,
-                    "--run-date",         effective_date,
-                ]
-                if date_column:
-                    oracle_args += ["--date-column", date_column]
-
-                yield "[gold] Launching Oracle load container...\n"
+                yield "[gold] Launching local Iceberg Gold container...\n"
                 client = _docker.DockerClient(base_url="unix:///var/run/docker.sock")
-                env    = {k: v for k, v in os.environ.items() if k not in _SKIP_ENV}
+                env    = _job_environment("gold")
                 container_ref[0] = client.containers.run(
                     _PIPELINE_IMAGE,
-                    command=oracle_args,
+                    command=gold_args,
                     environment=env,
                     network=_COMPOSE_NETWORK,
-                    volumes={_VAULT_VOL: {"bind": "/vault/secrets", "mode": "ro"}},
                     detach=True,
                     remove=False,
                 )
@@ -1926,7 +2105,7 @@ def run_transform_load():
                 result = container_ref[0].wait()
                 yield f"\n--- Gold Exit {result['StatusCode']} ---\n"
             except Exception as exc:
-                yield f"\n[gold] ERROR launching oracle-load container: {exc}\n--- Gold Exit 1 ---\n"
+                yield f"\n[gold] ERROR launching local Gold container: {exc}\n--- Gold Exit 1 ---\n"
 
         _remove_active_job(key)
         if container_ref[0]:
@@ -1935,7 +2114,7 @@ def run_transform_load():
             except Exception:
                 pass
 
-    return Response(stream_with_context(generate_with_cleanup()), mimetype="text/plain")
+    return Response(background_job_stream(generate_with_cleanup), mimetype="text/plain")
 
 
 @app.route("/silver/compile-dbt", methods=["POST"])
@@ -2043,7 +2222,7 @@ _TRINO_URL      = os.environ.get("TRINO_URL", "http://trino:8080")
 def _trino_schema_context() -> str:
     import urllib.request, json as _json
     headers = {"X-Trino-User": "lake-assistant", "Content-Type": "text/plain"}
-    catalog = "minio"
+    catalog = ICEBERG_CATALOG
     lines: list[str] = []
     try:
         def _q(sql: str) -> list:
@@ -2084,8 +2263,8 @@ Schema context (current catalog snapshot):
 Rules:
 1. Always respond with a Trino SQL query in ```sql ... ``` plus a one-line explanation — for every request, including:
    - Data queries (SELECT, aggregations, filters)
-   - Catalog discovery (SHOW SCHEMAS IN minio, SHOW TABLES IN minio.<schema>)
-   - Table inspection (DESCRIBE minio.<schema>.<table>, SHOW COLUMNS FROM ...)
+   - Catalog discovery (SHOW SCHEMAS IN {catalog}, SHOW TABLES IN {catalog}.<schema>)
+   - Table inspection (DESCRIBE {catalog}.<schema>.<table>, SHOW COLUMNS FROM ...)
 2. Use fully-qualified names (catalog.schema.table). Never invent columns or tables not in the schema above.
 3. If the question is genuinely unanswerable with SQL (e.g. a greeting), reply in plain text with no code block.
 """
@@ -2110,7 +2289,7 @@ def lake_ask():
                     f"{_TRINO_URL}/v1/statement",
                     data=sql_query.encode(),
                     headers={"X-Trino-User": "lake-assistant", "Content-Type": "text/plain",
-                             "X-Trino-Catalog": "minio", "X-Trino-Schema": "default"},
+                             "X-Trino-Catalog": ICEBERG_CATALOG, "X-Trino-Schema": "default"},
                     method="POST",
                 )
                 with urllib.request.urlopen(req, timeout=15) as r:
@@ -2136,7 +2315,7 @@ def lake_ask():
         "model":  _OPENAI_MODEL,
         "stream": True,
         "messages": [
-            {"role": "system", "content": _LAKE_SYSTEM.format(schema=schema)},
+            {"role": "system", "content": _LAKE_SYSTEM.format(schema=schema, catalog=ICEBERG_CATALOG)},
             {"role": "user",   "content": question},
         ],
     }).encode()
@@ -2196,11 +2375,15 @@ if __name__ == "__main__":
             conn.commit()
             cur.execute("SELECT id, cron_expression FROM public.scheduled_jobs WHERE is_active = TRUE")
             for row in cur.fetchall():
-                _schedule_job(row["id"], row["cron_expression"])
+                try:
+                    _schedule_job(row["id"], row["cron_expression"])
+                except (TypeError, ValueError) as exc:
+                    print(f"[scheduler] Skipping invalid job {row['id']}: {exc}")
     except Exception as exc:
         print(f"[scheduler] Failed to load jobs on startup: {exc}")
 
     _scheduler.start()
+    close_connection()
 
     debug = os.environ.get("FLASK_DEBUG", "0") == "1"
     app.run(debug=debug, host="0.0.0.0", port=5000, threaded=True)

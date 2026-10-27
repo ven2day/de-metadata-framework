@@ -3,8 +3,8 @@
     materialized='table',
     properties={
         "format":        "'PARQUET'",
-        "location":      "'s3://de-iceberg-warehouse-bucket/de_silver/enigma_aggregation_us_states/'",
-        "data_location": "'s3://de-data-silver/enigma_aggregation_us_states/'"
+        "location":      "'s3://" ~ env_var('ICEBERG_METADATA_BUCKET', 'de-iceberg-warehouse-bucket') ~ "/" ~ env_var('SILVER_DATABASE', 'de_silver') ~ "/enigma_aggregation_us_states/'",
+        "data_location": "'s3://" ~ env_var('SILVER_DATA_BUCKET', 'de-data-silver') ~ "/enigma_aggregation_us_states/'"
     },
   )
 }}

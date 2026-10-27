@@ -1,9 +1,12 @@
 import re
 import os
 import sys
+import threading
 
 import psycopg2
 from psycopg2.extras import RealDictCursor
+from psycopg2.extensions import TRANSACTION_STATUS_INERROR
+from flask import g, has_app_context
 
 PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 sys.path.insert(0, PROJECT_ROOT)
@@ -12,7 +15,7 @@ from ingestion.env.DE_Ingestion_properties import (
     SUPABASE_JDBC_URL, SUPABASE_DB_USER, SUPABASE_DB_PASSWORD,
 )
 
-_conn: "psycopg2.extensions.connection | None" = None
+_thread_connections = threading.local()
 _JDBC_RE = re.compile(r"jdbc:postgresql://([^:/]+):(\d+)/(.+)")
 
 # AUTH_DATABASE_URL overrides SUPABASE_JDBC_URL for the auth DB connection.
@@ -20,12 +23,23 @@ _JDBC_RE = re.compile(r"jdbc:postgresql://([^:/]+):(\d+)/(.+)")
 # Format: postgresql://postgres.[ref]:[password]@aws-0-[region].pooler.supabase.com:6543/postgres
 # Strip jdbc: prefix if user copied the JDBC URL format instead of the libpq format.
 _AUTH_DB_URL = os.environ.get("AUTH_DATABASE_URL", "").strip().removeprefix("jdbc:")
+_AUTH_DB_HOST = os.environ.get("AUTH_DB_HOST", "").strip()
 
 
 def _pg_dsn() -> "dict | str":
     """Return either a DSN dict (JDBC fallback) or a libpq connection string (AUTH_DATABASE_URL)."""
     if _AUTH_DB_URL:
         return _AUTH_DB_URL
+
+    if _AUTH_DB_HOST:
+        return {
+            "host": _AUTH_DB_HOST,
+            "port": int(os.environ.get("AUTH_DB_PORT", "5432")),
+            "dbname": os.environ.get("AUTH_DB_NAME", "de_app"),
+            "user": os.environ.get("AUTH_DB_USER", "de_app"),
+            "password": os.environ.get("AUTH_DB_PASSWORD", ""),
+            "sslmode": os.environ.get("AUTH_DB_SSLMODE", "disable"),
+        }
 
     m = _JDBC_RE.match(SUPABASE_JDBC_URL)
     if not m:
@@ -48,18 +62,29 @@ def _pg_dsn() -> "dict | str":
 
 
 def get_conn() -> "psycopg2.extensions.connection":
-    """Return a live psycopg2 connection, reconnecting if closed or broken."""
-    global _conn
-    try:
-        if _conn and not _conn.closed:
-            _conn.cursor().execute("SELECT 1")
-            return _conn
-    except Exception:
-        pass
-    dsn = _pg_dsn()
-    _conn = psycopg2.connect(dsn) if isinstance(dsn, str) else psycopg2.connect(**dsn)
-    _conn.autocommit = False
-    return _conn
+    """Reuse one connection per Flask context, never across request threads."""
+    storage = g if has_app_context() else _thread_connections
+    conn = getattr(storage, "auth_db_connection", None)
+    if conn is None or conn.closed:
+        conn = get_fresh_conn()
+        storage.auth_db_connection = conn
+    elif conn.get_transaction_status() == TRANSACTION_STATUS_INERROR:
+        # A handled constraint failure must not poison the rest of this request.
+        conn.rollback()
+    return conn
+
+
+def close_connection(_error=None):
+    """End read transactions and release the request's database connection."""
+    storage = g if has_app_context() else _thread_connections
+    conn = getattr(storage, "auth_db_connection", None)
+    if conn is not None:
+        delattr(storage, "auth_db_connection")
+        if not conn.closed:
+            try:
+                conn.rollback()
+            finally:
+                conn.close()
 
 
 def get_fresh_conn() -> "psycopg2.extensions.connection":

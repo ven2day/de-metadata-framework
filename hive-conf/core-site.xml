@@ -7,6 +7,10 @@
     <value>http://minio:9000</value>
   </property>
   <property>
+    <name>fs.s3a.endpoint.region</name>
+    <value>${env.AWS_REGION}</value>
+  </property>
+  <property>
     <name>fs.s3a.path.style.access</name>
     <value>true</value>
   </property>

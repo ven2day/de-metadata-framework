@@ -1,6 +1,20 @@
 # Secrets — never bake into the image
 .env
-
+.env.*
+**/.env
+**/.env.*
+*.env
+**/*.env
+*.env.*
+**/*.env.*
+!.env.example
+!**/.env.example
+# This vendored adapter matrix is not a credential/configuration file.
+!transformation/dbt_packages/dbt_utils/supported_adapters.env
+.secrets/
+**/.secrets/
+secrets.local/
+**/secrets.local/
 # Local build artifact — image builds its own via RUN zip
 ingestion.zip
 
@@ -9,6 +23,10 @@ __pycache__/
 *.pyc
 *.pyo
 *.egg-info/
+**/__pycache__/
+**/*.pyc
+**/*.pyo
+**/*.egg-info/
 .venv/
 
 # Spark local state
@@ -20,12 +38,95 @@ derby.log
 *.csv
 *.json
 *.log
+!symbols.csv
+!examples/**/*.csv
 
 # IDE / OS
 .idea/
 .claude/
+.vscode/
+**/.vscode/
+.aws/
+**/.aws/
+.ssh/
+**/.ssh/
+.gcp/
+**/.gcp/
+.cloudflared/
+**/.cloudflared/
+.netrc
+**/.netrc
+.npmrc
+**/.npmrc
+.pypirc
+**/.pypirc
+.azure/
+**/.azure/
+.config/gcloud/
+**/.config/gcloud/
+.codex/
+**/.codex/
+.agents/
+**/.agents/
+.cursor/
+**/.cursor/
 .DS_Store
 
 # Git
 .git/
 .gitignore
+transformation/.user.yml
+
+# Keep sensitive artifacts excluded after public example-file exceptions.
+# Private keys, certificate bundles, SSH identities, and downloaded DB wallets.
+**/*.pem
+**/*.key
+**/*.p12
+**/*.pfx
+**/*.jks
+**/*.keystore
+**/id_rsa
+**/id_rsa.*
+**/id_ed25519
+**/id_ed25519.*
+**/id_ecdsa
+**/id_ecdsa.*
+**/id_dsa
+**/id_dsa.*
+**/Wallet*/
+**/wallet*/
+**/WALLET*/
+**/cwallet.sso
+**/ewallet.*
+
+# Runtime tokens and local credential exports must not reach build context.
+credentials.local.*
+**/credentials.local.*
+secrets.local.*
+**/secrets.local.*
+**/dhan-access-token*.json
+**/dhan-access-token*.json.*
+**/dhan_access_token*.json
+**/dhan_access_token*.json.*
+**/.vault-token
+**/vault-init*.json
+**/vault-init*.json.*
+**/vault-keys.*
+**/pipeline_token
+**/vault_token
+**/gitleaks-report*
+**/.gitleaks-report*
+**/gitleaks*.sarif
+**/secret-scan-report*
+**/token-report*
+
+# Backups can contain old credentials even after local configuration changes.
+**/*.bak
+**/*.bak.*
+**/*.backup
+**/*.backup.*
+**/*.old
+**/*.orig
+**/*~
+backup/
+backups/

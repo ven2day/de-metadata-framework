@@ -1,6 +1,35 @@
 # ── Secrets & local config ────────────────────────────────────────────────────
 .env
-conf/spark-defaults.conf
+.env.*
+*.env
+*.env.*
+!.env.example
+.secrets/
+secrets.local/
+
+# Ignore rules protect new files only. They do not untrack files already in
+# Git or remove credentials from existing commits/history.
+
+# Private keys, certificate bundles, SSH identities, and downloaded DB wallets.
+*.pem
+*.key
+*.p12
+*.pfx
+*.jks
+*.keystore
+id_rsa
+id_rsa.*
+id_ed25519
+id_ed25519.*
+id_ecdsa
+id_ecdsa.*
+id_dsa
+id_dsa.*
+Wallet*/
+wallet*/
+WALLET*/
+cwallet.sso
+ewallet.*
 
 # ── Python ────────────────────────────────────────────────────────────────────
 .venv/
@@ -21,7 +50,10 @@ derby.log
 # ── Data files ────────────────────────────────────────────────────────────────
 *.parquet
 *.csv
+!symbols.csv
 *.json
+!examples/
+!examples/**/*.csv
 
 # ── Logs ─────────────────────────────────────────────────────────────────────
 *.log
@@ -29,9 +61,57 @@ derby.log
 # ── IDE ───────────────────────────────────────────────────────────────────────
 .idea/
 .claude/
+.vscode/
+.aws/
+.ssh/
+.gcp/
+.cloudflared/
+.netrc
+.npmrc
+.pypirc
+.azure/
+.config/gcloud/
+.codex/
+.agents/
+.cursor/
 
-# ── Tests (local only, not committed) ────────────────────────────────────────
-tests/
+# ── Test artifacts ───────────────────────────────────────────────────────────
+.pytest_cache/
+
+# dbt restores these dependencies and outputs during startup/builds. Already
+# tracked vendored files stay tracked; newly downloaded artifacts are local.
+transformation/dbt_packages/
+transformation/target/
+transformation/logs/
+transformation/.user.yml
 
 # ── OS ────────────────────────────────────────────────────────────────────────
 .DS_Store
+
+# Keep credential exports/reports and backups excluded even inside examples/.
+credentials.local.*
+secrets.local.*
+dhan-access-token*.json
+dhan-access-token*.json.*
+dhan_access_token*.json
+dhan_access_token*.json.*
+.vault-token
+vault-init*.json
+vault-init*.json.*
+vault-keys.*
+pipeline_token
+vault_token
+gitleaks-report*
+.gitleaks-report*
+gitleaks*.sarif
+secret-scan-report*
+token-report*
+*.bak
+*.bak.*
+*.backup
+*.backup.*
+*.old
+*.orig
+*~
+/backup/
+/backups/

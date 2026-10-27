@@ -1,12 +1,12 @@
 import io
 import sys
 from flask import Flask, request, Response, stream_with_context
-from pyspark.sql import SparkSession
+from ingestion.pyfiles.spark_session import get_spark_session
 
 app = Flask(__name__)
 
 # One SparkSession shared across all queries — never torn down.
-spark = SparkSession.builder.appName("lake-sql-server").getOrCreate()
+spark = get_spark_session()
 spark.sparkContext.setLogLevel("ERROR")
 
 

@@ -2,7 +2,7 @@ version: 2
 
 sources:
   - name: de_bronze
-    database: minio
-    schema: de_bronze
+    database: "{{ env_var('ICEBERG_CATALOG', 'minio') }}"
+    schema: "{{ env_var('BRONZE_DATABASE', 'de_bronze') }}"
     tables:
       - name: enigma_aggregation_us_states

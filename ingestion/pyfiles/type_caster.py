@@ -63,8 +63,9 @@ def cast_columns(df: DataFrame, metadata_df: DataFrame) -> DataFrame:
             target_type = _TYPE_MAP.get(raw_type)
 
         if target_type is None:
-            logger.warning("Unknown datatype '%s' for column '%s' — skipping", raw_type, col_name)
-            continue
+            raise ValueError(
+                f"Unknown metadata datatype {raw_type!r} for column {col_name!r}"
+            )
 
         try:
             df = df.withColumn(col_name, F.col(col_name).cast(target_type))

@@ -8,14 +8,17 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         zip \
     && rm -rf /var/lib/apt/lists/*
 
-ENV JAVA_HOME=/usr/lib/jvm/java-17-openjdk-arm64
+RUN JAVA_BIN="$(readlink -f "$(command -v java)")" \
+    && ln -s "$(dirname "$(dirname "$JAVA_BIN")")" /opt/java
+ENV JAVA_HOME=/opt/java
 ENV PATH="${JAVA_HOME}/bin:${PATH}"
 
 WORKDIR /app
 
 # ── Smart pip installer ───────────────────────────────────────────────────────
 COPY docker/pip_install.sh /usr/local/bin/pip_install
-RUN chmod +x /usr/local/bin/pip_install
+RUN sed -i 's/\r$//' /usr/local/bin/pip_install \
+    && chmod +x /usr/local/bin/pip_install
 
 # ── Heavy deps (PySpark, pandas, pyarrow, grpcio) ────────────────────────────
 COPY requirements-heavy.txt .
@@ -57,8 +60,7 @@ RUN --mount=type=cache,target=/root/.spark-jars-cache \
             echo "  [cached]   $name"; \
         fi; \
         cp "$CACHE/$name" "$SPARK_JARS/"; \
-    done && \
-    sed -i 's|^spark\.jars\.packages|# spark.jars.packages|' /app/conf/spark-defaults.conf
+    done
 
 # ── Application code ──────────────────────────────────────────────────────────
 COPY ingestion/       ingestion/
@@ -66,6 +68,7 @@ COPY bronze_layer/    bronze_layer/
 COPY ui/              ui/
 COPY transformation/  transformation/
 COPY oracle_layer/    oracle_layer/
+COPY gold_layer/      gold_layer/
 RUN cd /app && zip -r ingestion.zip ingestion/ && zip -r bronze_layer.zip bronze_layer/
 
 # ── Install DBT packages ──────────────────────────────────────────────────────
@@ -78,6 +81,8 @@ COPY docker/sql_runner.py         docker/sql_runner.py
 COPY docker/spark_query_server.py docker/spark_query_server.py
 COPY docker/entrypoint.sh    /entrypoint.sh
 COPY docker/ui-entrypoint.sh /ui-entrypoint.sh
-RUN chmod +x /entrypoint.sh /ui-entrypoint.sh
+RUN sed -i 's/\r$//' /entrypoint.sh /ui-entrypoint.sh \
+    && chmod +x /entrypoint.sh /ui-entrypoint.sh
 
+ENV PYTHONPATH=/app
 ENTRYPOINT ["/entrypoint.sh"]

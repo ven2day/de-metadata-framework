@@ -1,5 +1,5 @@
 import sys
-from pyspark.sql import SparkSession
+from ingestion.pyfiles.spark_session import get_spark_session
 
 if len(sys.argv) < 2:
     print("Usage: sql_runner.py <sql_query>")
@@ -7,7 +7,7 @@ if len(sys.argv) < 2:
 
 sql = sys.argv[1]
 
-spark = SparkSession.builder.appName("lake-sql").getOrCreate()
+spark = get_spark_session()
 spark.sparkContext.setLogLevel("ERROR")
 
 try:

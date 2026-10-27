@@ -1,4 +1,7 @@
+import re
+
 from pyspark.sql import DataFrame, SparkSession
+from pyspark.sql import functions as F
 from ingestion.env.DE_Ingestion_properties import (
     SUPABASE_JDBC_URL,
     SUPABASE_DB_USER,
@@ -8,6 +11,7 @@ from ingestion.pyfiles.logger import get_logger
 from ingestion.pyfiles.vault_client import get_encrypt_value
 
 logger = get_logger(__name__)
+_IDENTIFIER = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
 
 def read_supabase_table(
@@ -17,14 +21,15 @@ def read_supabase_table(
     columns: list[str] | None = None,
     filters: dict[str, str] | None = None,
 ) -> DataFrame:
-    qualified_table = f"{schema}.{source_table_name}" if schema else source_table_name
-    col_expr = ", ".join(columns) if columns else "*"
-    where_clause = (
-        " WHERE " + " AND ".join(f"{c} = '{v}'" for c, v in filters.items())
-        if filters
-        else ""
-    )
-    query = f"(SELECT {col_expr} FROM {qualified_table}{where_clause}) AS spark_tbl"
+    identifiers = [source_table_name]
+    if schema:
+        identifiers.append(schema)
+    identifiers.extend(columns or [])
+    identifiers.extend((filters or {}).keys())
+    invalid = [value for value in identifiers if not _IDENTIFIER.fullmatch(value)]
+    if invalid:
+        raise ValueError(f"Invalid PostgreSQL identifier(s): {invalid}")
+    qualified_table = f'"{schema}"."{source_table_name}"' if schema else f'"{source_table_name}"'
 
     logger.info("Reading database table '%s'", qualified_table)
 
@@ -38,11 +43,15 @@ def read_supabase_table(
         spark.read
         .format("jdbc")
         .option("url", SUPABASE_JDBC_URL)
-        .option("dbtable", query)
+        .option("dbtable", qualified_table)
         .option("user", SUPABASE_DB_USER)
         .option("password", password)
         .option("driver", "org.postgresql.Driver")
         .load()
     )
+    if columns:
+        df = df.select(*[F.col(name) for name in columns])
+    for name, value in (filters or {}).items():
+        df = df.filter(F.col(name) == F.lit(value))
     logger.info("Loaded %d columns from '%s'", len(df.columns), qualified_table)
     return df

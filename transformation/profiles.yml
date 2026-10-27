@@ -7,8 +7,8 @@ de_transformation:
       host:     "{{ env_var('TRINO_HOST', 'localhost') }}"
       port:     "{{ env_var('TRINO_PORT', '8081') | int }}"
       user:     dbt
-      database: minio
-      schema:   de_silver
+      database: "{{ env_var('ICEBERG_CATALOG', 'minio') }}"
+      schema:   "{{ env_var('SILVER_DATABASE', 'de_silver') }}"
       threads:  4
     docker:
       type:     trino
@@ -16,6 +16,6 @@ de_transformation:
       host:     trino
       port:     8080
       user:     dbt
-      database: minio
-      schema:   de_silver
+      database: "{{ env_var('ICEBERG_CATALOG', 'minio') }}"
+      schema:   "{{ env_var('SILVER_DATABASE', 'de_silver') }}"
       threads:  4

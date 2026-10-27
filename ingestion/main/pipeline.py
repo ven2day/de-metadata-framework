@@ -7,6 +7,7 @@ import boto3
 
 from ingestion.env.DE_Ingestion_properties import (
     MINIO_ENDPOINT,
+    MINIO_REGION,
     MINIO_ACCESS_KEY,
     MINIO_SECRET_KEY,
     LOG_S3_BUCKET,
@@ -23,6 +24,7 @@ from ingestion.pyfiles.type_caster import cast_columns
 from ingestion.pyfiles.pii_processor import apply_pii
 from ingestion.source.s3_reader import read_s3_file, resolve_s3_key
 from ingestion.source.supabase_reader import read_supabase_table
+from ingestion.source.dhan_reader import read_dhan_snapshot
 from ingestion.sink.minio_writer import write_to_minio
 
 logger = get_logger(__name__)
@@ -91,6 +93,60 @@ def run_database_pipeline(
     logger.info("=== ETL Pipeline Complete [app=%s, date=%s] ===", args.application_name, args.ingest_date)
 
 
+def run_dhan_pipeline(
+    args: Namespace,
+    instruments: str | None,
+    mode: str = "quote",
+    output_table_name: str | None = None,
+    output_database: str | None = None,
+    output_catalog: str | None = None,
+    output_bucket: str | None = None,
+    metadata_key: str | None = None,
+    write_mode: str = "append",
+    symbols: str | None = None,
+    symbols_file: str | None = None,
+) -> None:
+    logger.info(
+        "=== ETL Pipeline Start [app=%s, date=%s, source=dhan, mode=%s] ===",
+        args.application_name,
+        args.ingest_date,
+        mode,
+    )
+
+    dhan_client = run_all_checks(args, minio_bucket=output_bucket)
+    spark = get_spark_session()
+    metadata = read_metadata(spark, key=metadata_key)
+    selection_options = {"symbols": symbols}
+    if symbols_file is not None:
+        selection_options["symbols_file"] = symbols_file
+    df = read_dhan_snapshot(
+        spark,
+        instruments=instruments,
+        mode=mode,
+        client=dhan_client,
+        **selection_options,
+    )
+
+    validate_schema(df, metadata)
+    df = cast_columns(df, metadata)
+    df = apply_pii(df, metadata)
+
+    write_to_minio(
+        spark,
+        df,
+        args,
+        output_table_name,
+        output_database,
+        output_catalog,
+        write_mode,
+    )
+    logger.info(
+        "=== ETL Pipeline Complete [app=%s, date=%s] ===",
+        args.application_name,
+        args.ingest_date,
+    )
+
+
 def _upload_log(local_path: str, s3_key: str) -> None:
     try:
         client = boto3.client(
@@ -98,6 +154,7 @@ def _upload_log(local_path: str, s3_key: str) -> None:
             endpoint_url=MINIO_ENDPOINT,
             aws_access_key_id=MINIO_ACCESS_KEY,
             aws_secret_access_key=MINIO_SECRET_KEY,
+            region_name=MINIO_REGION,
         )
         client.upload_file(local_path, LOG_S3_BUCKET, s3_key, ExtraArgs={"ContentType": "text/plain"})
         logger.info("Log uploaded → s3://%s/%s", LOG_S3_BUCKET, s3_key)
@@ -119,7 +176,7 @@ if __name__ == "__main__":
     pipeline_error = None
     app_id = None
     try:
-        if args.source_type == "s3":
+        if args.source_type in {"s3", "dhan-live"}:
             run_s3_pipeline(
                 args=args,
                 source_key=args.source_key,
@@ -131,7 +188,7 @@ if __name__ == "__main__":
                 metadata_key=args.metadata_key,
                 write_mode=args.write_mode,
             )
-        else:
+        elif args.source_type == "database":
             run_database_pipeline(
                 args=args,
                 source_table_name=args.source_table_name,
@@ -143,6 +200,22 @@ if __name__ == "__main__":
                 metadata_key=args.metadata_key,
                 write_mode=args.write_mode,
             )
+        elif args.source_type == "dhan":
+            run_dhan_pipeline(
+                args=args,
+                instruments=args.dhan_instruments,
+                symbols=args.dhan_symbols,
+                symbols_file=args.dhan_symbols_file,
+                mode=args.dhan_mode,
+                output_table_name=args.output_table_name,
+                output_database=args.output_database,
+                output_catalog=args.output_catalog,
+                output_bucket=args.output_bucket,
+                metadata_key=args.metadata_key,
+                write_mode=args.write_mode,
+            )
+        else:  # argparse choices should make this unreachable
+            raise ValueError(f"Unsupported source type: {args.source_type}")
     except Exception as exc:
         pipeline_error = exc
         logger.error("Pipeline failed: %s", exc, exc_info=True)

@@ -6,7 +6,7 @@ import sys
 import boto3
 
 from ingestion.env.DE_Ingestion_properties import (
-    MINIO_ENDPOINT, MINIO_ACCESS_KEY, MINIO_SECRET_KEY, LOG_S3_BUCKET,
+    MINIO_ENDPOINT, MINIO_REGION, MINIO_ACCESS_KEY, MINIO_SECRET_KEY, LOG_S3_BUCKET,
     ICEBERG_CATALOG, LAKE_DATABASE, BRONZE_DATABASE,
 )
 from ingestion.pyfiles.logger import get_logger, setup_log_file, close_log_file
@@ -50,6 +50,7 @@ def _upload_log(local_path: str, s3_key: str) -> None:
             endpoint_url=MINIO_ENDPOINT,
             aws_access_key_id=MINIO_ACCESS_KEY,
             aws_secret_access_key=MINIO_SECRET_KEY,
+            region_name=MINIO_REGION,
         )
         client.upload_file(local_path, LOG_S3_BUCKET, s3_key, ExtraArgs={"ContentType": "text/plain"})
         logger.info("Log uploaded → s3://%s/%s", LOG_S3_BUCKET, s3_key)

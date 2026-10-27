@@ -1,13 +1,16 @@
 import re
 from datetime import datetime
+from fnmatch import fnmatchcase
 
 import boto3
+from botocore.exceptions import ClientError
 from pyspark.sql import DataFrame, SparkSession
 
 from ingestion.env.DE_Ingestion_properties import (
     SOURCE_S3_BUCKET,
     SOURCE_S3_ENDPOINT,
     SOURCE_S3_ACCESS_KEY,
+    SOURCE_S3_REGION,
     SOURCE_S3_SECRET_KEY,
 )
 from ingestion.pyfiles.logger import get_logger
@@ -45,6 +48,7 @@ def _s3_client():
         endpoint_url=SOURCE_S3_ENDPOINT.strip(),
         aws_access_key_id=SOURCE_S3_ACCESS_KEY,
         aws_secret_access_key=SOURCE_S3_SECRET_KEY,
+        region_name=SOURCE_S3_REGION,
     )
 
 
@@ -52,8 +56,29 @@ def _key_exists(client, bucket: str, key: str) -> bool:
     try:
         client.head_object(Bucket=bucket, Key=key)
         return True
-    except Exception:
-        return False
+    except ClientError as exc:
+        code = str(exc.response.get("Error", {}).get("Code", ""))
+        if code in {"404", "NoSuchKey", "NotFound"}:
+            return False
+        raise
+
+
+def _matching_keys(client, bucket: str, pattern: str) -> list[str]:
+    """List all objects matching a glob pattern, using paginated S3 listings."""
+    wildcard_positions = [
+        position for token in ("*", "?", "[")
+        if (position := pattern.find(token)) >= 0
+    ]
+    prefix = pattern[: min(wildcard_positions)] if wildcard_positions else pattern
+    paginator = client.get_paginator("list_objects_v2")
+    matches: list[str] = []
+    for page in paginator.paginate(Bucket=bucket, Prefix=prefix):
+        matches.extend(
+            item["Key"]
+            for item in page.get("Contents", [])
+            if fnmatchcase(item["Key"], pattern)
+        )
+    return matches
 
 
 def resolve_s3_key(bucket: str, key: str, ingest_date: str) -> str:
@@ -75,6 +100,25 @@ def resolve_s3_key(bucket: str, key: str, ingest_date: str) -> str:
     """
     dt = datetime.strptime(ingest_date, "%Y-%m-%d")
     client = _s3_client()
+
+    # Immutable live-feed micro-batches are consumed with an explicit glob,
+    # e.g. dhan/nse/date=2026-10-25/hour=09/minute=15/*.json.
+    if any(token in key for token in ("*", "?", "[")):
+        resolved_pattern = key
+        for token, fmt in _TOKEN_TO_STRFTIME.items():
+            resolved_pattern = resolved_pattern.replace(token, dt.strftime(fmt))
+        matches = _matching_keys(client, bucket, resolved_pattern)
+        if not matches:
+            raise FileNotFoundError(
+                f"No S3 objects match pattern '{resolved_pattern}' in bucket '{bucket}'"
+            )
+        logger.info(
+            "Source pattern resolved to %d objects: s3://%s/%s",
+            len(matches),
+            bucket,
+            resolved_pattern,
+        )
+        return resolved_pattern
 
     # Step 1 — exact match (always attempted first, regardless of __)
     if _key_exists(client, bucket, key):
@@ -107,10 +151,10 @@ def resolve_s3_key(bucket: str, key: str, ingest_date: str) -> str:
     accepted_dates = {dt.strftime(fmt) for _, fmt in _DATE_PATTERNS}
     prefix = key.rsplit("__", 1)[0]  # everything before the last '__'
 
-    try:
-        resp = client.list_objects_v2(Bucket=bucket, Prefix=prefix, MaxKeys=200)
-        candidates = []
-        for obj in resp.get("Contents", []):
+    candidates = []
+    paginator = client.get_paginator("list_objects_v2")
+    for page in paginator.paginate(Bucket=bucket, Prefix=prefix):
+        for obj in page.get("Contents", []):
             obj_key = obj["Key"]
             remainder = obj_key[len(prefix):]       # e.g. "__2024-01-15.csv"
             if not remainder.startswith("__"):
@@ -119,12 +163,10 @@ def resolve_s3_key(bucket: str, key: str, ingest_date: str) -> str:
             if date_part in accepted_dates:
                 candidates.append((obj["LastModified"], obj_key))
 
-        if candidates:
-            resolved = sorted(candidates, reverse=True)[0][1]
-            logger.info("Source key resolved (listing): s3://%s/%s", bucket, resolved)
-            return resolved
-    except Exception as exc:
-        logger.warning("S3 listing failed during key resolution (prefix=%s): %s", prefix, exc)
+    if candidates:
+        resolved = sorted(candidates, reverse=True)[0][1]
+        logger.info("Source key resolved (listing): s3://%s/%s", bucket, resolved)
+        return resolved
 
     raise FileNotFoundError(
         f"Cannot resolve source key '{key}' for ingest_date={ingest_date} "

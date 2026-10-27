@@ -6,12 +6,15 @@ from botocore.exceptions import BotoCoreError, ClientError
 from ingestion.env.DE_Ingestion_properties import (
     SOURCE_S3_ENDPOINT,
     SOURCE_S3_ACCESS_KEY,
+    SOURCE_S3_REGION,
     SOURCE_S3_SECRET_KEY,
     SOURCE_S3_BUCKET,
     MINIO_ENDPOINT,
+    MINIO_REGION,
     MINIO_ACCESS_KEY,
     MINIO_SECRET_KEY,
     MINIO_BUCKET,
+    ICEBERG_DATA_BUCKET,
     SUPABASE_JDBC_URL,
     SUPABASE_DB_USER,
     SUPABASE_DB_PASSWORD,
@@ -31,6 +34,7 @@ def check_source_s3(bucket: str | None = None) -> None:
             endpoint_url=SOURCE_S3_ENDPOINT,
             aws_access_key_id=SOURCE_S3_ACCESS_KEY,
             aws_secret_access_key=SOURCE_S3_SECRET_KEY,
+            region_name=SOURCE_S3_REGION,
         )
         client.head_bucket(Bucket=bucket)
         logger.info("Source S3 OK")
@@ -42,7 +46,7 @@ def check_source_s3(bucket: str | None = None) -> None:
 
 
 def check_minio(bucket: str | None = None) -> None:
-    bucket = bucket or MINIO_BUCKET
+    bucket = bucket or ICEBERG_DATA_BUCKET
     logger.info("Checking MinIO connectivity")
     try:
         client = boto3.client(
@@ -50,6 +54,7 @@ def check_minio(bucket: str | None = None) -> None:
             endpoint_url=MINIO_ENDPOINT,
             aws_access_key_id=MINIO_ACCESS_KEY,
             aws_secret_access_key=MINIO_SECRET_KEY,
+            region_name=MINIO_REGION,
         )
         client.head_bucket(Bucket=bucket)
         logger.info("MinIO OK")
@@ -91,14 +96,32 @@ def check_supabase() -> None:
         raise RuntimeError(f"Supabase connectivity check failed: {exc}") from exc
 
 
+def check_dhan(client=None):
+    """Validate the 24-hour token and paid Data API entitlement."""
+    logger.info("Checking Dhan connectivity and market-data entitlement")
+    from ingestion.dhan.client import DhanRestClient
+
+    api = client or DhanRestClient.from_env()
+    api.validate_market_data_access()
+    logger.info("Dhan API OK")
+    return api
+
+
 def run_all_checks(
         args: Namespace,
     source_bucket: str | None = None,
     minio_bucket: str | None = None,
-) -> None:
-    if args.source_type.upper() == "S3":
+) -> object | None:
+    source_type = args.source_type.strip().lower()
+    dhan_client = None
+    if source_type in {"s3", "dhan-live"}:
         check_source_s3(bucket=source_bucket)
-    else:
+    elif source_type == "database":
         check_supabase()
+    elif source_type == "dhan":
+        dhan_client = check_dhan()
+    else:
+        raise ValueError(f"Unsupported source type: {args.source_type}")
     check_minio(bucket=minio_bucket)
     logger.info("All connectivity checks passed")
+    return dhan_client

@@ -1,0 +1,49 @@
+title = "Framework secret protection"
+
+[extend]
+useDefault = true
+
+# Keep all built-in provider/private-key rules. Add Dhan-specific literals,
+# which generic scanners may not recognize. Never allowlist real credentials
+# or entire source/test directories to silence a finding.
+[[rules]]
+id = "dhan-quoted-credential"
+description = "Dhan credential assigned as a quoted literal"
+regex = '''(?i)\bDHAN_(?:API_KEY|API_SECRET|ACCESS_TOKEN|TOTP_SECRET)\b["']?\s*[:=]\s*["']([a-z0-9_+/=.!-]{8,})["']'''
+secretGroup = 1
+keywords = ["dhan_"]
+
+[[rules.allowlists]]
+description = "Explicit synthetic fixtures only, never arbitrary test contents"
+condition = "AND"
+paths = ['''(^|/)tests/''']
+regexTarget = "secret"
+regexes = ['''^(?:opaque-test-token-secret|unrelated-api-key|unrelated-api-secret|JBSWY3DPEHPK3PXP|must-not-be-used|test-only-[a-zA-Z0-9_-]+)$''']
+
+[[rules.allowlists]]
+description = "Fixed UI request-rejection and OAuth fixtures, not real keys"
+condition = "AND"
+paths = ['''(^|/)tests/test_ui_dhan\.py$''']
+regexTarget = "secret"
+regexes = ['''^(?:key-secret-marker|oauth-secret-marker|must-not-be-accepted|must-not-echo|SENSITIVE|secret-post-value|oauth-key|oauth-secret)$''']
+
+[[rules]]
+id = "dhan-env-credential"
+description = "Dhan credential assigned as an unquoted environment value"
+regex = '''(?mi)^[ \t]*(?:export[ \t]+)?DHAN_(?:API_KEY|API_SECRET|ACCESS_TOKEN|TOTP_SECRET)[ \t]*=[ \t]*([a-z0-9_+/=.!-]{8,})[ \t\r]*(?:#[^\r\n]*)?$'''
+secretGroup = 1
+keywords = ["dhan_"]
+
+[[rules]]
+id = "dhan-pin-literal"
+description = "Dhan login PIN assigned as a literal"
+regex = '''(?mi)\bDHAN_PIN\b["']?\s*[:=]\s*["']?([0-9]{6})(?:["']|[ \t]*(?:#.*)?\r?$)'''
+secretGroup = 1
+keywords = ["dhan_pin"]
+
+[[rules.allowlists]]
+description = "Well-known dummy PINs in isolated tests only"
+condition = "AND"
+paths = ['''(^|/)tests/''']
+regexTarget = "secret"
+regexes = ['''^(?:000000|111111|123456|222222|654321|999999)$''']

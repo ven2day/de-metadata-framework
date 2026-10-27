@@ -10,23 +10,122 @@
 #   hive-metastore   — Iceberg catalog registry (HMS)
 #   trino            — SQL engine for DBT silver transformations
 #   ui               — Flask web UI (always running)
-#   pipeline         — spark-submit runner (on-demand via `docker-compose run`)
-#   cloudflared      — Cloudflare Tunnel (routes atestingdomain.info → local services)
+#   pipeline         — spark-submit runner (on-demand via `docker compose run`)
+#   dhan-pipeline    — Dhan-capable Spark runner (profile: dhan-tools)
+#   dhan-auth        — one-shot Dhan access-token helper (profile: dhan-tools)
+#   dhan-live        — durable Dhan WebSocket collector (profile: dhan)
+#   cloudflared      — optional Cloudflare Tunnel (profile: public)
 #
 # First-time setup:
-#   1. Add SALT_2 and SUPABASE_DB_PASSWORD_PLAIN to .env
-#   2. Add CLOUDFLARE_TUNNEL_TOKEN to .env (from Cloudflare Zero Trust dashboard)
-#   3. docker-compose up -d minio vault      # start infrastructure
-#   4. docker-compose up -d vault-init       # start vault daemon (bootstraps automatically)
-#   5. docker-compose up -d ui              # start the UI + tunnel
+#   1. Copy .env.example to .env and replace every REQUIRED_ value.
+#   2. Run: docker compose config --quiet
+#   3. Run: docker compose up -d --build
+#   4. See docs/DHAN_NSE.md before enabling a Dhan profile.
 #
-# Subsequent starts: docker-compose up -d
+# Subsequent starts: docker compose up -d
+
+# Every Python service uses the same application image. Building the UI also
+# provides the image that its Docker launcher needs for on-demand jobs.
+x-application-image: &application-image ${COMPOSE_PROJECT_NAME:-de-metadata-framework}-pipeline:latest
+
+x-source-s3-environment: &source-s3-environment
+  SOURCE_S3_ENDPOINT: ${SOURCE_S3_ENDPOINT:-http://minio:9000}
+  SOURCE_S3_ACCESS_KEY: ${SOURCE_S3_ACCESS_KEY:-${MINIO_ACCESS_KEY:-minioadmin}}
+  SOURCE_S3_SECRET_KEY: ${SOURCE_S3_SECRET_KEY:-${MINIO_SECRET_KEY:-minioadmin}}
+  SOURCE_S3_BUCKET: ${SOURCE_S3_BUCKET:-de-source-data-bucket}
+  SOURCE_S3_REGION: ${SOURCE_S3_REGION:-us-east-1}
+
+x-common-job-environment: &common-job-environment
+  <<: *source-s3-environment
+  MINIO_ENDPOINT: ${MINIO_ENDPOINT:-http://minio:9000}
+  MINIO_REGION: ${MINIO_REGION:-us-east-1}
+  MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY:-minioadmin}
+  MINIO_SECRET_KEY: ${MINIO_SECRET_KEY:-minioadmin}
+  MINIO_BUCKET: ${MINIO_BUCKET:-de-data-lake}
+  METADATA_S3_BUCKET: ${METADATA_S3_BUCKET:-de-metadata-bucket}
+  METADATA_S3_KEY: ${METADATA_S3_KEY:-}
+  SPARK_APP_NAME: ${SPARK_APP_NAME:-DE-Metadata-Framework}
+  SPARK_MASTER: ${SPARK_MASTER:-local[*]}
+  HIVE_METASTORE_URI: thrift://hive-metastore:9083
+  ICEBERG_WAREHOUSE: ${ICEBERG_WAREHOUSE:-s3a://de-iceberg-warehouse-bucket/}
+  ICEBERG_DATA_BUCKET: ${ICEBERG_DATA_BUCKET:-de-data-lake}
+  ICEBERG_METADATA_BUCKET: ${ICEBERG_METADATA_BUCKET:-de-iceberg-warehouse-bucket}
+  ICEBERG_CATALOG: ${ICEBERG_CATALOG:-minio}
+  ICEBERG_DATABASE: ${ICEBERG_DATABASE:-default}
+  LAKE_DATABASE: ${LAKE_DATABASE:-de_lake}
+  BRONZE_DATABASE: ${BRONZE_DATABASE:-de_bronze}
+  BRONZE_DATA_BUCKET: ${BRONZE_DATA_BUCKET:-de-data-bronze}
+  TRANSFORMATION_DATABASE: ${TRANSFORMATION_DATABASE:-de_transformation}
+  TRANSFORMATION_DATA_BUCKET: ${TRANSFORMATION_DATA_BUCKET:-de-data-transformation}
+  SILVER_DATABASE: ${SILVER_DATABASE:-de_silver}
+  SILVER_DATA_BUCKET: ${SILVER_DATA_BUCKET:-de-data-silver}
+  GOLD_DATABASE: ${GOLD_DATABASE:-de_gold}
+  GOLD_DATA_BUCKET: ${GOLD_DATA_BUCKET:-de-data-gold}
+  TRINO_HOST: trino
+  TRINO_PORT: "8080"
+  LOG_S3_BUCKET: ${LOG_S3_BUCKET:-de-data-migration-logs}
+  SALT_KEY: ${SALT_KEY:-change-me-generate-a-32-char-random-string}
+  VAULT_ADDR: http://vault:8200
+  VAULT_PATH: ${VAULT_PATH:-encryption/pii}
+  VAULT_NAMESPACE: ${VAULT_NAMESPACE:-}
+  BREVO_API_KEY: ${BREVO_API_KEY:-}
+  BREVO_FROM_EMAIL: ${BREVO_FROM_EMAIL:-}
+  NOTIFY_EMAIL: ${NOTIFY_EMAIL:-}
+  AWS_REGION: ${AWS_REGION:-${MINIO_REGION:-us-east-1}}
+  AWS_DEFAULT_REGION: ${AWS_DEFAULT_REGION:-${MINIO_REGION:-us-east-1}}
+
+x-database-source-environment: &database-source-environment
+  SUPABASE_URL: ${SUPABASE_URL:-}
+  SUPABASE_KEY: ${SUPABASE_KEY:-}
+  SUPABASE_JDBC_URL: ${SUPABASE_JDBC_URL:-}
+  SUPABASE_DB_USER: ${SUPABASE_DB_USER:-postgres}
+  SUPABASE_DB_PASSWORD: ${SUPABASE_DB_PASSWORD:-}
+
+x-dhan-token-environment: &dhan-token-environment
+  DHAN_CLIENT_ID: ${DHAN_CLIENT_ID:-}
+  DHAN_ACCESS_TOKEN: ${DHAN_ACCESS_TOKEN:-}
+  DHAN_ACCESS_TOKEN_FILE: /run/secrets/dhan-access-token.json
+  DHAN_PIN: ${DHAN_PIN:-}
+  DHAN_TOTP_SECRET: ${DHAN_TOTP_SECRET:-}
+  DHAN_HTTP_TIMEOUT_SECONDS: ${DHAN_HTTP_TIMEOUT_SECONDS:-15}
+
+x-dhan-pipeline-environment: &dhan-pipeline-environment
+  <<: *dhan-token-environment
+  DHAN_SYMBOLS: ${DHAN_SYMBOLS:-}
+  DHAN_SYMBOLS_FILE: ${DHAN_SYMBOLS_FILE:-}
+  DHAN_INSTRUMENTS: ${DHAN_INSTRUMENTS:-}
+  DHAN_INSTRUMENT_CACHE_FILE: /var/cache/dhan/instruments.csv
+  DHAN_SNAPSHOT_MODE: ${DHAN_SNAPSHOT_MODE:-quote}
+  DHAN_RAW_BUCKET: ${DHAN_RAW_BUCKET:-${SOURCE_S3_BUCKET:-de-source-data-bucket}}
+
+x-dhan-auth-environment: &dhan-auth-environment
+  <<: *dhan-token-environment
+  DHAN_API_KEY: ${DHAN_API_KEY:-}
+  DHAN_API_SECRET: ${DHAN_API_SECRET:-}
+  DHAN_REDIRECT_URL: ${DHAN_REDIRECT_URL:-}
+
+x-dhan-live-environment: &dhan-live-environment
+  <<: *dhan-token-environment
+  DHAN_SYMBOLS: ${DHAN_SYMBOLS:-}
+  DHAN_SYMBOLS_FILE: ${DHAN_SYMBOLS_FILE:-}
+  DHAN_INSTRUMENTS: ${DHAN_INSTRUMENTS:-}
+  DHAN_INSTRUMENT_CACHE_FILE: /var/cache/dhan/instruments.csv
+  DHAN_RAW_BUCKET: ${DHAN_RAW_BUCKET:-${SOURCE_S3_BUCKET:-de-source-data-bucket}}
+  DHAN_RAW_PREFIX: ${DHAN_RAW_PREFIX:-dhan/nse}
+  DHAN_FEED_MODE: ${DHAN_FEED_MODE:-quote}
+  DHAN_FLUSH_SECONDS: ${DHAN_FLUSH_SECONDS:-5}
+  DHAN_BATCH_SIZE: ${DHAN_BATCH_SIZE:-1000}
+  DHAN_SPOOL_DIR: /var/lib/dhan-spool
 
 services:
 
   # ── MinIO — object store ────────────────────────────────────────────────────
   minio:
-    image: minio/minio:latest
+    image: ${COMPOSE_PROJECT_NAME:-de-metadata-framework}-minio:local
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.minio
+      target: server
     container_name: minio
     restart: unless-stopped
     environment:
@@ -34,11 +133,11 @@ services:
       MINIO_ROOT_PASSWORD:         ${MINIO_SECRET_KEY:-minioadmin}
       MINIO_BROWSER_REDIRECT_URL:  ${MINIO_BROWSER_REDIRECT_URL:-http://localhost:9001}
       MINIO_SERVER_URL:            ${MINIO_SERVER_URL:-http://localhost:9000}
-      MINIO_SITE_REGION:           us-east-1
+      MINIO_SITE_REGION:           ${MINIO_REGION:-us-east-1}
     command: server /data --console-address ":9001"
     ports:
-      - "9000:9000"   # S3 API
-      - "9001:9001"   # MinIO Console
+      - "127.0.0.1:9000:9000"   # S3 API
+      - "127.0.0.1:9001:9001"   # MinIO Console
     volumes:
       - minio_data:/data
     healthcheck:
@@ -52,7 +151,11 @@ services:
 
   # ── MinIO Init — bucket provisioner ────────────────────────────────────────
   minio-init:
-    image: minio/mc:latest
+    image: ${COMPOSE_PROJECT_NAME:-de-metadata-framework}-mc:local
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.minio
+      target: client
     container_name: minio-init
     restart: "no"
     depends_on:
@@ -62,28 +165,58 @@ services:
       MINIO_ACCESS_KEY:  ${MINIO_ACCESS_KEY:-minioadmin}
       MINIO_SECRET_KEY:  ${MINIO_SECRET_KEY:-minioadmin}
       MINIO_BUCKET:      ${MINIO_BUCKET:-de-data-lake}
+      ICEBERG_DATA_BUCKET: ${ICEBERG_DATA_BUCKET:-de-data-lake}
       SOURCE_S3_BUCKET:  ${SOURCE_S3_BUCKET:-de-source-data-bucket}
+      METADATA_S3_BUCKET: ${METADATA_S3_BUCKET:-de-metadata-bucket}
+      ICEBERG_METADATA_BUCKET: ${ICEBERG_METADATA_BUCKET:-de-iceberg-warehouse-bucket}
+      LOG_S3_BUCKET: ${LOG_S3_BUCKET:-de-data-migration-logs}
+      BRONZE_DATA_BUCKET: ${BRONZE_DATA_BUCKET:-de-data-bronze}
+      TRANSFORMATION_DATA_BUCKET: ${TRANSFORMATION_DATA_BUCKET:-de-data-transformation}
+      SILVER_DATA_BUCKET: ${SILVER_DATA_BUCKET:-de-data-silver}
+      GOLD_DATA_BUCKET: ${GOLD_DATA_BUCKET:-de-data-gold}
+      DHAN_RAW_BUCKET: ${DHAN_RAW_BUCKET:-${SOURCE_S3_BUCKET:-de-source-data-bucket}}
     entrypoint: >
       /bin/sh -c "
         mc alias set local http://minio:9000 $$MINIO_ACCESS_KEY $$MINIO_SECRET_KEY &&
         mc mb --ignore-existing local/$$MINIO_BUCKET &&
+        mc mb --ignore-existing local/$$ICEBERG_DATA_BUCKET &&
         mc mb --ignore-existing local/$$SOURCE_S3_BUCKET &&
-        mc mb --ignore-existing local/de-iceberg-warehouse-bucket &&
-        mc mb --ignore-existing local/de-metadata-bucket &&
-        mc mb --ignore-existing local/de-data-migration-logs &&
-        mc mb --ignore-existing local/de-data-bronze &&
-        mc mb --ignore-existing local/de-data-transformation &&
-        mc mb --ignore-existing local/de-data-silver &&
+        mc mb --ignore-existing local/$$METADATA_S3_BUCKET &&
+        mc mb --ignore-existing local/$$ICEBERG_METADATA_BUCKET &&
+        mc mb --ignore-existing local/$$LOG_S3_BUCKET &&
+        mc mb --ignore-existing local/$$BRONZE_DATA_BUCKET &&
+        mc mb --ignore-existing local/$$TRANSFORMATION_DATA_BUCKET &&
+        mc mb --ignore-existing local/$$SILVER_DATA_BUCKET &&
+        mc mb --ignore-existing local/$$GOLD_DATA_BUCKET &&
+        mc mb --ignore-existing local/$$DHAN_RAW_BUCKET &&
+        mc cp --recursive /seed-metadata/ local/$$METADATA_S3_BUCKET/examples/ &&
         echo 'All buckets ready'
       "
+    volumes:
+      - ./examples/metadata:/seed-metadata:ro
     networks:
       - de-net
 
   # ── HashiCorp Vault — secrets store ────────────────────────────────────────
+  # A new named volume is root-owned. Prepare only this data volume before
+  # Vault drops privileges to its dedicated user; preserve existing contents.
+  vault-storage-init:
+    image: hashicorp/vault:latest
+    container_name: vault-storage-init
+    user: "0:0"
+    restart: "no"
+    entrypoint: ["/bin/sh", "-ec", "chown -R vault:vault /vault/data"]
+    volumes:
+      - vault_data:/vault/data
+    network_mode: none
+
   vault:
     image: hashicorp/vault:latest
     container_name: vault
     restart: unless-stopped
+    depends_on:
+      vault-storage-init:
+        condition: service_completed_successfully
     mem_limit: 256m
     cap_add:
       - IPC_LOCK   # prevents secret memory from being swapped to disk
@@ -94,12 +227,12 @@ services:
           "storage":       {"file": {"path": "/vault/data"}},
           "listener":      [{"tcp": {"address": "0.0.0.0:8200", "tls_disable": "true"}}],
           "ui":            true,
-          "api_addr":      "https://vault.atestingdomain.info",
+          "api_addr":      "${VAULT_API_ADDR:-http://localhost:8200}",
           "disable_mlock": true
         }
     command: server
     ports:
-      - "8200:8200"   # Vault API + UI
+      - "127.0.0.1:8200:8200"   # Vault API + UI
     volumes:
       - vault_data:/vault/data
     healthcheck:
@@ -117,6 +250,7 @@ services:
   # Other services depend on this being healthy (= vault is unsealed).
   vault-init:
     build: .
+    image: *application-image
     container_name: vault-init
     entrypoint: ["python3", "/app/docker/vault_init.py"]
     restart: unless-stopped
@@ -131,11 +265,6 @@ services:
       VAULT_PATH:                 ${VAULT_PATH:-encryption/pii}
       SALT_2:                     ${SALT_2:-}
       SUPABASE_DB_PASSWORD_PLAIN: ${SUPABASE_DB_PASSWORD_PLAIN:-}
-      ORACLE_USER:                ${ORACLE_USER:-}
-      ORACLE_PASSWORD:            ${ORACLE_PASSWORD:-}
-      ORACLE_DSN:                 ${ORACLE_DSN:-}
-      ORACLE_WALLET_PASSWORD:     ${ORACLE_WALLET_PASSWORD:-}
-      ORACLE_WALLET_ZIP_B64:      ${ORACLE_WALLET_ZIP_B64:-}
     healthcheck:
       # Healthy when Vault is initialized and unsealed (HTTP 200)
       test: ["CMD-SHELL", "curl -sf http://vault:8200/v1/sys/health"]
@@ -165,6 +294,26 @@ services:
     networks:
       - de-net
 
+  # Local application/auth database. Set AUTH_DATABASE_URL to use an external
+  # PostgreSQL/Supabase database instead.
+  postgres-app:
+    image: postgres:16
+    container_name: postgres-app
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${AUTH_DB_NAME:-de_app}
+      POSTGRES_USER: ${AUTH_DB_USER:-de_app}
+      POSTGRES_PASSWORD: ${AUTH_DB_PASSWORD:-change-me-auth-db}
+    volumes:
+      - postgres_app_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    networks:
+      - de-net
+
   # ── Hive Metastore — Iceberg catalog registry ───────────────────────────────
   hive-metastore:
     build:
@@ -188,10 +337,12 @@ services:
       HIVE_CUSTOM_CONF_DIR: /hive-custom-conf
       AWS_ACCESS_KEY_ID:     ${MINIO_ACCESS_KEY:-minioadmin}
       AWS_SECRET_ACCESS_KEY: ${MINIO_SECRET_KEY:-minioadmin}
+      AWS_REGION:            ${MINIO_REGION:-us-east-1}
+      AWS_DEFAULT_REGION:    ${MINIO_REGION:-us-east-1}
     volumes:
       - ./hive-conf:/hive-custom-conf:ro
     ports:
-      - "9083:9083"
+      - "127.0.0.1:9083:9083"
     healthcheck:
       test: ["CMD-SHELL", "bash -c '</dev/tcp/localhost/9083' 2>/dev/null && echo ok || exit 1"]
       interval: 10s
@@ -214,10 +365,11 @@ services:
     environment:
       MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY:-minioadmin}
       MINIO_SECRET_KEY: ${MINIO_SECRET_KEY:-minioadmin}
+      MINIO_REGION: ${MINIO_REGION:-us-east-1}
     volumes:
       - ./trino/etc:/etc/trino:ro
     ports:
-      - "8081:8080"
+      - "127.0.0.1:8081:8080"
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8080/v1/info"]
       interval: 10s
@@ -227,9 +379,33 @@ services:
     networks:
       - de-net
 
+  # Long-running Spark SQL bridge used by the UI's query console.
+  spark-sql:
+    build: .
+    image: *application-image
+    container_name: spark-sql
+    entrypoint: ["/entrypoint.sh", "spark-server"]
+    restart: unless-stopped
+    depends_on:
+      hive-metastore:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    environment:
+      <<: *common-job-environment
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:5002/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 12
+      start_period: 90s
+    networks:
+      - de-net
+
   # ── Flask UI ────────────────────────────────────────────────────────────────
   ui:
     build: .
+    image: *application-image
     container_name: de-ui
     entrypoint: ["/ui-entrypoint.sh"]
     restart: unless-stopped
@@ -240,35 +416,59 @@ services:
         condition: service_completed_successfully
       vault-init:
         condition: service_healthy
-    env_file:
-      - .env
+      postgres-app:
+        condition: service_healthy
+      spark-sql:
+        condition: service_healthy
     environment:
-      MINIO_ENDPOINT:       http://minio:9000
-      SOURCE_S3_ENDPOINT:   http://minio:9000
-      VAULT_ADDR:           http://vault:8200
-      COMPOSE_PROJECT_NAME: de-metadata-framework
-      AWS_REGION:           us-east-1
-      AWS_DEFAULT_REGION:   us-east-1
+      <<: [*common-job-environment, *database-source-environment, *dhan-pipeline-environment, *dhan-auth-environment]
+      FLASK_SECRET_KEY:    ${FLASK_SECRET_KEY:-}
+      ROOT_PASSWORD:       ${ROOT_PASSWORD:-}
+      ROOT_EMAIL:          ${ROOT_EMAIL:-root@localhost}
+      COMPOSE_PROJECT_NAME: ${COMPOSE_PROJECT_NAME:-de-metadata-framework}
       OPENAI_API_KEY:       ${OPENAI_API_KEY:-}
       OPENAI_MODEL:         ${OPENAI_MODEL:-gpt-4.1-nano}
       TRINO_HOST:           trino
       TRINO_PORT:           "8080"
-      BEHIND_HTTPS_PROXY:   "1"
+      SPARK_SQL_URL:        http://spark-sql:5002
+      BEHIND_HTTPS_PROXY:   ${BEHIND_HTTPS_PROXY:-0}
+      SCHEDULER_TIMEZONE:   ${SCHEDULER_TIMEZONE:-Asia/Kolkata}
+      AUTH_DB_HOST:         ${AUTH_DB_HOST:-postgres-app}
+      AUTH_DB_PORT:         ${AUTH_DB_PORT:-5432}
+      AUTH_DB_NAME:         ${AUTH_DB_NAME:-de_app}
+      AUTH_DB_USER:         ${AUTH_DB_USER:-de_app}
+      AUTH_DB_PASSWORD:     ${AUTH_DB_PASSWORD:-change-me-auth-db}
+      AUTH_DB_SSLMODE:      ${AUTH_DB_SSLMODE:-disable}
+      AUTH_DATABASE_URL:    ${AUTH_DATABASE_URL:-}
     volumes:
       - vault_secrets:/vault/secrets:ro
+      # Read cached authentication state without allowing the web process to
+      # create/renew tokens. Explicit snapshot jobs mount this volume read/write.
+      - dhan_secrets:/run/secrets:ro
+      - dhan_instruments:/var/cache/dhan
+      - ./symbols.csv:/app/config/symbols.csv:ro
       - /var/run/docker.sock:/var/run/docker.sock
       - ./transformation:/app/transformation   # live mount so DBT models written by the UI persist
     ports:
-      - "5001:5000"
+      - "127.0.0.1:5001:5000"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:5000/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 6
+      start_period: 90s
     networks:
       - de-net
 
   # ── Cloudflare Tunnel — expose services via atestingdomain.info ────────────
+  # SECURITY: the UI controls Docker through the host socket. Do not enable
+  # this profile for untrusted/public production access.
   cloudflared:
     image: cloudflare/cloudflared:latest
     container_name: cloudflared
+    profiles: ["public"]
     restart: unless-stopped
-    command: --loglevel info tunnel --no-autoupdate --protocol http2 run --token ${CLOUDFLARE_TUNNEL_TOKEN}
+    command: --loglevel info tunnel --no-autoupdate --protocol http2 run --token ${CLOUDFLARE_TUNNEL_TOKEN:-}
     mem_limit: 128m
     mem_reservation: 64m
     depends_on:
@@ -278,9 +478,10 @@ services:
       - de-net
 
   # ── Pipeline runner (on-demand) ─────────────────────────────────────────────
-  # Usage: docker-compose run --rm pipeline --application-name myapp ...
+  # Usage: docker compose run --rm pipeline --application-name myapp ...
   pipeline:
     build: .
+    image: *application-image
     container_name: de-pipeline
     restart: "no"
     depends_on:
@@ -290,17 +491,74 @@ services:
         condition: service_healthy
       hive-metastore:
         condition: service_healthy
-    env_file:
-      - .env
     environment:
-      MINIO_ENDPOINT:     http://minio:9000
-      SOURCE_S3_ENDPOINT: http://minio:9000
-      VAULT_ADDR:         http://vault:8200
-      VAULT_PATH:         ${VAULT_PATH:-encryption/pii}
-      AWS_REGION:         us-east-1
-      AWS_DEFAULT_REGION: us-east-1
+      <<: [*common-job-environment, *database-source-environment]
     volumes:
       - vault_secrets:/vault/secrets:ro
+    networks:
+      - de-net
+
+  # Dhan-capable Spark runner. Keeping brokerage credentials out of the generic
+  # pipeline prevents ordinary S3/database jobs from inheriting them.
+  dhan-pipeline:
+    build: .
+    image: *application-image
+    profiles: ["dhan-tools"]
+    restart: "no"
+    depends_on:
+      vault-init:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+      hive-metastore:
+        condition: service_healthy
+    environment:
+      <<: [*common-job-environment, *dhan-pipeline-environment]
+    volumes:
+      - vault_secrets:/vault/secrets:ro
+      - dhan_secrets:/run/secrets
+      - dhan_instruments:/var/cache/dhan
+      - ./symbols.csv:/app/config/symbols.csv:ro
+    networks:
+      - de-net
+
+  # One-shot Dhan credential helper. Example:
+  # docker compose run --rm dhan-auth oauth-start
+  dhan-auth:
+    build: .
+    image: *application-image
+    profiles: ["dhan-tools"]
+    entrypoint: ["/entrypoint.sh", "dhan-auth"]
+    restart: "no"
+    environment:
+      <<: *dhan-auth-environment
+    volumes:
+      - dhan_secrets:/run/secrets
+    networks:
+      - de-net
+
+  # Dedicated long-running Dhan WebSocket collector. It writes immutable JSONL
+  # batches into SOURCE_S3_BUCKET for the normal metadata pipeline to consume.
+  dhan-live:
+    build: .
+    image: *application-image
+    container_name: dhan-live
+    profiles: ["dhan"]
+    entrypoint: ["/entrypoint.sh", "dhan-live"]
+    restart: unless-stopped
+    stop_grace_period: 2m
+    depends_on:
+      minio:
+        condition: service_healthy
+      minio-init:
+        condition: service_completed_successfully
+    environment:
+      <<: [*source-s3-environment, *dhan-live-environment]
+    volumes:
+      - dhan_secrets:/run/secrets
+      - dhan_spool:/var/lib/dhan-spool
+      - dhan_instruments:/var/cache/dhan
+      - ./symbols.csv:/app/config/symbols.csv:ro
     networks:
       - de-net
 
@@ -313,6 +571,14 @@ volumes:
   vault_secrets:
     driver: local
   postgres_meta_data:
+    driver: local
+  postgres_app_data:
+    driver: local
+  dhan_secrets:
+    driver: local
+  dhan_spool:
+    driver: local
+  dhan_instruments:
     driver: local
 
 networks:

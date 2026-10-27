@@ -1,3 +1,6 @@
+from datetime import datetime
+import re
+
 from pyspark.sql import DataFrame, SparkSession
 from pyspark.sql import functions as F
 from pyspark.sql.functions import partitioning
@@ -11,6 +14,28 @@ from ingestion.pyfiles.iceberg_repair import table_exists_safe
 from ingestion.pyfiles.logger import get_logger
 
 logger = get_logger(__name__)
+_IDENTIFIER = re.compile(r"^[a-z_][a-z0-9_]*$")
+
+
+def _validate_names_and_date(
+    app_name: str,
+    run_date: str,
+    catalog: str,
+    lake_db: str,
+    bronze_db: str,
+) -> None:
+    for label, value in (
+        ("application", app_name),
+        ("catalog", catalog),
+        ("lake database", lake_db),
+        ("bronze database", bronze_db),
+    ):
+        if not _IDENTIFIER.fullmatch(value):
+            raise ValueError(f"Invalid {label} identifier: {value!r}")
+    try:
+        datetime.strptime(run_date, "%Y-%m-%d")
+    except ValueError as exc:
+        raise ValueError("run_date must use YYYY-MM-DD") from exc
 
 
 def extract_bronze_keys(metadata_df: DataFrame) -> tuple[list[str], str | None]:
@@ -66,11 +91,12 @@ def _write_bronze(
     bronze_db: str,
 ) -> None:
     full_table     = f"{catalog}.{bronze_db}.{app_name}"
-    data_path      = f"s3a://{BRONZE_DATA_BUCKET}/{app_name}"
+    physical_name  = f"{catalog}/{bronze_db}/{app_name}"
+    data_path      = f"s3a://{BRONZE_DATA_BUCKET}/{physical_name}"
     # "location" sets the Iceberg table's base directory in the HMS catalog entry.
     # Metadata files land at  {location}/metadata/*.json / *.avro
     # Data files are redirected to data_path via write.data.path.
-    table_location = f"s3a://{ICEBERG_METADATA_BUCKET}/de_bronze/{app_name}"
+    table_location = f"s3a://{ICEBERG_METADATA_BUCKET}/iceberg/{physical_name}"
 
     logger.info(
         "Writing bronze Iceberg table '%s' (location=%s, data=%s)",
@@ -103,6 +129,7 @@ def run_full(
     lake_db: str = LAKE_DATABASE,
     bronze_db: str = BRONZE_DATABASE,
 ) -> None:
+    _validate_names_and_date(app_name, run_date, catalog, lake_db, bronze_db)
     lake_table   = f"{catalog}.{lake_db}.{app_name}"
     bronze_table = f"{catalog}.{bronze_db}.{app_name}"
     logger.info("=== Bronze FULL [app=%s, date=%s] ===", app_name, run_date)
@@ -116,7 +143,10 @@ def run_full(
         .filter(F.col("ingest_date") == F.to_date(F.lit(run_date)))
         .drop("ingest_date")
     )
-    logger.info("Lake rows for run_date=%s: %d", run_date, df.count())
+    row_count = df.count()
+    if row_count == 0:
+        raise ValueError(f"No Lake rows for {app_name} on {run_date}; Bronze was not changed")
+    logger.info("Lake rows for run_date=%s: %d", run_date, row_count)
 
     df = _dedup(df, primary_keys, timestamp_col)
     df = df.withColumn("snapshot_date", F.to_date(F.lit(run_date)))
@@ -143,6 +173,7 @@ def run_delta(
     lake_db: str = LAKE_DATABASE,
     bronze_db: str = BRONZE_DATABASE,
 ) -> None:
+    _validate_names_and_date(app_name, run_date, catalog, lake_db, bronze_db)
     lake_table   = f"{catalog}.{lake_db}.{app_name}"
     bronze_table = f"{catalog}.{bronze_db}.{app_name}"
     logger.info("=== Bronze DELTA [app=%s, date=%s] ===", app_name, run_date)
@@ -156,7 +187,10 @@ def run_delta(
         .filter(F.col("ingest_date") == F.to_date(F.lit(run_date)))
         .drop("ingest_date")
     )
-    logger.info("Lake rows for run_date=%s: %d", run_date, df_new.count())
+    row_count = df_new.count()
+    if row_count == 0:
+        raise ValueError(f"No Lake rows for {app_name} on {run_date}; Bronze was not changed")
+    logger.info("Lake rows for run_date=%s: %d", run_date, row_count)
     df_new = _dedup(df_new, primary_keys, timestamp_col)
 
     # Step 2: first-time run — bronze table doesn't exist yet, fall back to full write
@@ -201,7 +235,13 @@ def run_delta(
             df_new.withColumn("_priority", F.lit(0))
             .unionByName(df_prev.withColumn("_priority", F.lit(1)))
         )
-        w = Window.partitionBy(*primary_keys).orderBy(F.col("_priority"))
+        order_columns = []
+        if timestamp_col and timestamp_col in df_union.columns:
+            # Late-arriving batches must not replace a newer market/database
+            # state merely because they came from today's input.
+            order_columns.append(F.col(timestamp_col).desc_nulls_last())
+        order_columns.append(F.col("_priority"))
+        w = Window.partitionBy(*primary_keys).orderBy(*order_columns)
         df_merged = (
             df_union
             .withColumn("_rn", F.row_number().over(w))

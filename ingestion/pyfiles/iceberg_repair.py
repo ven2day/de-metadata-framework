@@ -7,7 +7,12 @@ import boto3
 from botocore.client import Config
 from pyspark.sql import SparkSession
 
-from ingestion.env.DE_Ingestion_properties import MINIO_ENDPOINT, MINIO_ACCESS_KEY, MINIO_SECRET_KEY
+from ingestion.env.DE_Ingestion_properties import (
+    MINIO_ACCESS_KEY,
+    MINIO_ENDPOINT,
+    MINIO_REGION,
+    MINIO_SECRET_KEY,
+)
 from ingestion.pyfiles.logger import get_logger
 
 logger = get_logger(__name__)
@@ -29,7 +34,7 @@ def _s3_client():
         aws_access_key_id=MINIO_ACCESS_KEY,
         aws_secret_access_key=MINIO_SECRET_KEY,
         config=Config(signature_version="s3v4"),
-        region_name="us-east-1",
+        region_name=MINIO_REGION,
     )
 
 

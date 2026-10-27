@@ -1,4 +1,5 @@
 from functools import wraps
+from urllib.parse import urlsplit
 
 from flask import Blueprint, render_template, redirect, url_for, request, abort
 from flask_login import login_user, logout_user, login_required, current_user
@@ -7,6 +8,15 @@ from ui.extensions import limiter
 from ui.models import User
 
 auth_bp = Blueprint("auth", __name__)
+
+
+def _local_next_url(value: str | None) -> str:
+    """Only redirect to an absolute path within this application."""
+    if value and value.startswith("/") and not value.startswith("//"):
+        parsed = urlsplit(value)
+        if not parsed.netloc and not parsed.scheme and "\\" not in value:
+            return value
+    return url_for("index")
 
 
 def root_required(f):
@@ -40,7 +50,7 @@ def login():
         else:
             User.record_login_success(user.id)
             login_user(user, remember=False)
-            return redirect(request.args.get("next") or url_for("index"))
+            return redirect(_local_next_url(request.args.get("next")))
 
     return render_template("login.html", error=error)
 
@@ -82,8 +92,8 @@ def users():
                         role="user", created_by=current_user.id,
                     )
                     success = f"User '{username}' created successfully."
-                except Exception as exc:
-                    errors.append(f"Database error: {exc}")
+                except Exception:
+                    errors.append("Could not create user. The username or email may already be registered.")
 
     return render_template(
         "users.html",

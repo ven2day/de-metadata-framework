@@ -29,4 +29,17 @@ def validate_schema(df: DataFrame, metadata_df: DataFrame) -> None:
             f"Extra in dataframe (no metadata mapping): {sorted(extra_in_df)}."
         )
 
+    metadata_names = {
+        row["column_name"].strip().lower(): row["column_name"].strip()
+        for row in metadata_df.select("column_name").collect()
+    }
+    case_mismatches = sorted(
+        column for column in df.columns if metadata_names[column.lower()] != column
+    )
+    if case_mismatches:
+        raise ValueError(
+            "Schema validation is case-sensitive for casting and PII rules. "
+            f"Rename these dataframe columns to match metadata exactly: {case_mismatches}"
+        )
+
     logger.info("Schema validation passed — %d columns matched", len(df_cols))

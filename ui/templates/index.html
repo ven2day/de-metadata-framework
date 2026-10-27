@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>DE Metadata Pipeline</title>
+  <title>NSE Data Workspace</title>
   <meta name="csrf-token" content="{{ csrf_token() }}">
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
@@ -188,6 +188,71 @@
     .mp-col-left {
       flex: 20; min-width: 0;
       position: sticky; top: 24px;
+    }
+
+    .nse-workspace { margin-bottom: 20px; position: relative; z-index: 1; }
+    .workspace-details { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; margin-bottom: 12px; }
+    .workspace-summary { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 12px; padding: 12px 16px; min-height: 46px; cursor: pointer; list-style: none; border-radius: 12px; }
+    .workspace-summary::-webkit-details-marker { display: none; }
+    .workspace-summary::before { content: '\203a'; display: inline-block; flex: 0 0 8px; font-size: 20px; line-height: 1; color: #795312; }
+    .workspace-details[open] > .workspace-summary::before { transform: rotate(90deg); }
+    .workspace-summary:hover { background: var(--amber-s); }
+    .workspace-summary:focus-visible { outline: 2px solid #795312; outline-offset: 3px; }
+    .workspace-summary-label { flex: 1 1 auto; font-size: 13px; font-weight: 650; overflow-wrap: anywhere; }
+    .workspace-summary .setup-state { max-width: 100%; }
+    .workspace-details-content { padding: 18px; border-top: 1px solid var(--border); }
+    .workspace-details-content .dhan-setup { margin-bottom: 0; box-shadow: none; }
+    .nse-workspace-header { display: flex; justify-content: space-between; align-items: flex-start; gap: 18px; margin-bottom: 16px; }
+    .workspace-kicker { color: #8a6011; font-size: 11px; font-weight: 700; letter-spacing: 1.3px; text-transform: uppercase; margin-bottom: 7px; }
+    .nse-workspace h1 { font-size: clamp(21px, 2.3vw, 30px); line-height: 1.2; letter-spacing: -.7px; margin-bottom: 8px; }
+    .workspace-description { max-width: 700px; color: #6a625a; line-height: 1.6; font-size: 13px; }
+    .workspace-date { flex-shrink: 0; padding: 10px 14px; border: 1px solid var(--border); border-radius: 12px; background: rgba(255,255,255,.75); font-size: 11px; color: #6a625a; }
+    .workspace-date time { display: block; font-size: 16px; font-weight: 650; color: var(--text); margin-bottom: 3px; }
+    .dhan-setup { background: var(--surface); border: 1px solid var(--border); border-radius: var(--card-r); box-shadow: var(--shadow); padding: 17px 20px; margin-bottom: 14px; }
+    .dhan-setup-header { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px; margin-bottom: 12px; }
+    .dhan-setup-title { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+    .dhan-setup h2 { font-size: 14px; font-weight: 650; }
+    .setup-state { display: inline-flex; padding: 4px 9px; border-radius: 100px; font-size: 11px; font-weight: 650; color: #735616; background: #fff3d7; }
+    .setup-state.missing { color: #9e382d; background: #fff0ed; }
+    .setup-state.unavailable { color: #665d54; background: #f0edE8; }
+    .setup-facts { display: flex; flex-wrap: wrap; gap: 8px 22px; color: #6a625a; font-size: 12px; margin-bottom: 10px; }
+    .setup-facts strong { color: var(--text); font-weight: 600; }
+    .setup-notice { font-size: 12px; line-height: 1.6; color: #6a625a; }
+    .setup-notice strong { color: #77530e; }
+    .setup-missing { margin-top: 8px; color: #9e382d; font-size: 12px; overflow-wrap: anywhere; }
+    .setup-guide { margin-top: 10px; font-size: 12px; color: #6a625a; line-height: 1.7; }
+    .setup-guide summary { color: #795312; font-weight: 600; cursor: pointer; }
+    .setup-guide code { color: var(--text); font-size: 11px; overflow-wrap: anywhere; }
+    .workspace-layers { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; }
+    .workspace-layer { display: flex; align-items: center; gap: 10px; text-align: left; padding: 12px 14px; border: 1px solid var(--border); border-radius: 12px; background: rgba(255,255,255,.75); cursor: pointer; color: var(--text); font: inherit; }
+    .workspace-layer:hover { border-color: #c2ac7e; }
+    .workspace-layer.active { border-color: #d79b26; background: #fff8e8; box-shadow: inset 0 0 0 1px #e9a825; }
+    .workspace-layer-number { color: #a28d6d; font-size: 11px; font-weight: 700; }
+    .workspace-layer strong { display: block; font-size: 13px; font-weight: 650; }
+    .workspace-layer small { display: block; color: #756b60; font-size: 11px; margin-top: 3px; }
+    .source-help { grid-column: 1 / -1; color: #6a625a; font-size: 12px; line-height: 1.65; }
+    .source-help strong { color: var(--text); }
+    #step-body-2 > .src-toggle { display: flex; flex-wrap: wrap; width: fit-content; max-width: 100%; }
+    #step-body-2 > .src-toggle label { padding: 6px 14px; }
+    #section-dhan .field, #section-dhan select { min-width: 0; max-width: 100%; }
+    .symbol-input { width: 100%; min-width: 0; resize: vertical; padding: 10px 12px; border: 1.5px solid var(--border); border-radius: var(--radius); background: var(--surface); color: var(--text); font: 13px var(--mono); line-height: 1.6; }
+    .symbol-input:focus { outline: none; border-color: var(--amber); }
+    .symbol-tools { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-top: 7px; }
+    .symbol-tools button:disabled { opacity: .5; cursor: not-allowed; }
+    .symbol-feedback { color: #6a625a; font-size: 12px; line-height: 1.6; }
+    .symbol-feedback.error { color: #9e382d; }
+    .symbol-results { margin-top: 9px; padding: 10px 12px; background: #f7f4ef; border: 1px solid var(--border); border-radius: 8px; max-height: 180px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; font: 11px/1.7 var(--mono); }
+    .snapshot-only-note { padding: 10px 12px; background: #fff8e8; border-radius: 8px; }
+    .dhan-schedule-note { margin-top: 9px; font-size: 12px; color: #795312; line-height: 1.6; }
+    @media (max-width: 768px) {
+      .workspace-summary { padding: 11px 12px; }
+      .workspace-summary-label { font-size: 12px; }
+      .workspace-details-content { padding: 12px; }
+      .nse-workspace-header { flex-direction: column; gap: 12px; }
+      .workspace-date { align-self: flex-start; }
+      .workspace-layers { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .workspace-layer { padding: 11px; }
+      .dhan-setup { padding: 15px; }
     }
     /* ── Step accordion cards ── */
     .step-card {
@@ -1645,8 +1710,8 @@
   <div class="top-brand-group">
     <div class="logo-mark"></div>
     <div>
-      <div class="top-brand">DE Metadata <span>Pipeline</span></div>
-      <div class="top-sub">Metadata-driven ingestion framework</div>
+      <div class="top-brand">NSE Data <span>Workspace</span></div>
+      <div class="top-sub">Dhan · Iceberg · Trino</div>
     </div>
   </div>
 
@@ -1658,11 +1723,11 @@
     <!-- Connectivity dots -->
     <div class="conn-item">
       <div class="conn-dot pinging" id="conn-minio-dot"></div>
-      <span class="conn-name" id="conn-minio-name">MinIO</span>
+      <span class="conn-name" id="conn-minio-name">Storage: checking</span>
     </div>
     <div class="conn-item">
       <div class="conn-dot pinging" id="conn-vault-dot"></div>
-      <span class="conn-name" id="conn-vault-name">Vault</span>
+      <span class="conn-name" id="conn-vault-name">Vault: checking</span>
     </div>
     <button class="top-btn" style="padding:4px 8px;font-size:13px;" title="Refresh connectivity" onclick="checkConnectivity()">↻</button>
 
@@ -1764,6 +1829,50 @@
 
 <!-- ── Page body ──────────────────────────────────────────── -->
 <div class="page-body">
+<section class="nse-workspace" aria-labelledby="workspace-summary-title">
+  <details class="workspace-details" id="nse-workspace-details">
+    <summary class="workspace-summary">
+      <span class="workspace-summary-label" id="workspace-summary-title">NSE workspace &middot; Dhan setup</span>
+      <span id="dhan-setup-state" class="setup-state unavailable" role="status">Checking local configuration</span>
+    </summary>
+    <div class="workspace-details-content">
+  <div class="nse-workspace-header">
+    <div>
+      <div class="workspace-kicker">NSE / Dhan</div>
+      <h1 id="workspace-title">NSE market data workspace</h1>
+      <p class="workspace-description">Fetch a current Dhan snapshot into Lake and Bronze. Transform it in Silver, then publish Gold locally with Iceberg and Trino.</p>
+    </div>
+    <div class="workspace-date"><time id="nse-trading-date">{{ trading_date|default('Checking date…') }}</time>India · Asia/Kolkata</div>
+  </div>
+  <section class="dhan-setup" aria-labelledby="dhan-setup-title">
+    <div class="dhan-setup-header">
+      <div class="dhan-setup-title"><h2 id="dhan-setup-title">Dhan setup</h2></div>
+      <button type="button" class="top-btn" id="dhan-status-refresh" onclick="refreshDhanStatus()">↻ Refresh setup</button>
+    </div>
+    <div class="setup-facts">
+      <span>Client ID: <strong id="dhan-client-status">not checked</strong></span>
+      <span>Authentication: <strong id="dhan-auth-status">not checked</strong></span>
+      <span>Instruments: <strong id="dhan-instrument-count">not checked</strong></span>
+    </div>
+    <p class="setup-notice"><strong>Not live. Connection and Data API entitlement have not been verified.</strong> Setup checks read local settings only; no Dhan request or token generation runs on page load or refresh.</p>
+    <p id="dhan-missing-config" class="setup-missing" hidden></p>
+    <p class="setup-notice" style="margin-top:7px;">The live collector is a separate opt-in service. Silver, Gold, and downstream schedules run only when you request or schedule them.</p>
+    <details class="setup-guide" id="dhan-setup-guide">
+      <summary>Configure Dhan locally</summary>
+      <p>Set <code>DHAN_CLIENT_ID</code> in local <code>.env</code> and add a valid access token or use the Dhan CLI to save one. Enter symbols below, or configure one server selection: <code>DHAN_SYMBOLS</code>, <code>DHAN_SYMBOLS_FILE</code>, or existing <code>DHAN_INSTRUMENTS</code> IDs. API key and secret alone require the browser-consent step; they are not a market-data access token. Credentials stay in local configuration and are never entered on this page.</p>
+      <p>For a local CSV selection, use <code>symbols.csv</code>: UTF-8 text with a single <code>symbol</code> header and one exact NSE symbol per row, for example <code>RELIANCE</code> and <code>TCS</code>. Configure <code>DHAN_SYMBOLS_FILE</code> on the server and its read-only Docker mount. Do not combine it with server symbols or IDs. Typed symbols below override the server selection for that request; this page never accepts a file path.</p>
+      <p>After changing <code>.env</code>, recreate the UI: <code>docker compose up -d --no-deps --force-recreate ui</code>, then refresh setup. This checks configuration, not connectivity or subscription access.</p>
+    </details>
+  </section>
+    </div>
+  </details>
+  <nav class="workspace-layers" aria-label="Data layers">
+    <button type="button" class="workspace-layer active" id="workspace-layer-lake" onclick="goToDataLayer('lake')" aria-current="step"><span class="workspace-layer-number">01</span><span><strong>Lake</strong><small>Dhan snapshot landing</small></span></button>
+    <button type="button" class="workspace-layer" id="workspace-layer-bronze" onclick="goToDataLayer('bronze')"><span class="workspace-layer-number">02</span><span><strong>Bronze</strong><small>Deduplicate and merge</small></span></button>
+    <button type="button" class="workspace-layer" id="workspace-layer-silver" onclick="goToDataLayer('silver')"><span class="workspace-layer-number">03</span><span><strong>Silver</strong><small>Transform with dbt</small></span></button>
+    <button type="button" class="workspace-layer" id="workspace-layer-gold" onclick="goToDataLayer('gold')"><span class="workspace-layer-number">04</span><span><strong>Gold</strong><small>Local Iceberg / Trino</small></span></button>
+  </nav>
+</section>
 <div class="page-wrapper" id="page-wrapper">
 
   <!-- ═══ Main panel ═══════════════════════════════════════ -->
@@ -1843,9 +1952,9 @@
 
       <!-- Gold load steps -->
       <div class="ps-steps-wrap" id="ps-tl-gold" style="display:none;">
-        <div class="ps-step"><div class="ps-dot" data-tlgstep="connect"></div> <span class="ps-label">Oracle Connect</span> <span class="ps-status" data-tlgstep="connect">—</span></div>
+        <div class="ps-step"><div class="ps-dot" data-tlgstep="connect"></div> <span class="ps-label">Read Silver</span> <span class="ps-status" data-tlgstep="connect">—</span></div>
         <div class="ps-step"><div class="ps-dot" data-tlgstep="table"></div>   <span class="ps-label">Ensure Table</span>   <span class="ps-status" data-tlgstep="table">—</span></div>
-        <div class="ps-step"><div class="ps-dot" data-tlgstep="load"></div>    <span class="ps-label">Load Data</span>      <span class="ps-status" data-tlgstep="load">—</span></div>
+        <div class="ps-step"><div class="ps-dot" data-tlgstep="load"></div>    <span class="ps-label">Publish Gold</span>   <span class="ps-status" data-tlgstep="load">—</span></div>
         <div class="ps-step"><div class="ps-dot" data-tlgstep="complete"></div><span class="ps-label">Complete</span>       <span class="ps-status" data-tlgstep="complete">—</span></div>
       </div>
 
@@ -1924,8 +2033,8 @@
         <div class="layer-node" id="nav-tl-gold" onclick="setTLLayer('gold')">
           <div class="layer-node-dot" id="nav-dot-tl-gold">2</div>
           <div class="layer-node-text">
-            <span class="layer-node-name">Gold Load</span>
-            <span class="layer-node-sub">Oracle ADW</span>
+            <span class="layer-node-name">Gold Publish</span>
+            <span class="layer-node-sub">Iceberg · Trino</span>
           </div>
         </div>
       </div>
@@ -1940,11 +2049,11 @@
       <input type="hidden" name="log_folder"  id="log_folder"  value="lake" />
       <input type="hidden" name="log_level"   id="log_level"   value="INFO" />
       <input type="hidden" name="write_mode"  id="write_mode"  value="overwrite" />
-      <input type="hidden" name="output_catalog" id="output_catalog" value="minio" />
+      <input type="hidden" name="output_catalog" id="output_catalog" value="{{ iceberg_catalog }}" />
       <input type="hidden" name="skip_bronze" id="skip_bronze_flag" value="0" />
-      <input type="hidden" name="output_database" id="output_database" value="de_lake" />
+      <input type="hidden" name="output_database" id="output_database" value="{{ lake_database }}" />
 
-      <button type="button" class="btn-run" id="run-btn" disabled style="width:100%;margin-bottom:16px;" onclick="triggerIngestionPipeline(this, false)">&#9654;&nbsp; Run Ingestion Pipeline</button>
+      <button type="button" class="btn-run" id="run-btn" disabled style="width:100%;margin-bottom:16px;" onclick="triggerIngestionPipeline(this, false)">&#9654;&nbsp; Fetch snapshot (Lake + Bronze)</button>
 
       <!-- ── Step 1: Application ─────────────────────────── -->
       <div class="step-card" id="step-card-1">
@@ -1965,11 +2074,11 @@
             <div class="field full">
               <label for="application_name">Application Name</label>
               <input type="text" id="application_name" name="application_name"
-                     placeholder="e.g. enigma_covid_19_us_states" />
+                     value="nse_market_snapshot" placeholder="e.g. nse_market_snapshot" />
             </div>
             <div class="field">
-              <label for="ingest_date">Run Date</label>
-              <input type="date" id="ingest_date" name="ingest_date" />
+              <label for="ingest_date">Run Date (India)</label>
+              <input type="date" id="ingest_date" name="ingest_date" value="{{ trading_date|default('') }}" readonly />
             </div>
             <div class="field">
               <label>Write Mode</label>
@@ -1989,23 +2098,41 @@
           <div class="step-num">2</div>
           <div class="step-info">
             <div class="step-name">Source</div>
-            <div class="step-desc">S3 file or database table, plus metadata sheet</div>
+            <div class="step-desc">Current Dhan snapshot or an existing S3/database source</div>
           </div>
           <div class="step-badge" id="step-badge-2">
             <div class="badge-dot"></div>
             <span class="badge-label">Incomplete</span>
           </div>
-          <div class="step-chevron" id="step-chevron-2">▾</div>
+          <div class="step-chevron open" id="step-chevron-2">▾</div>
         </div>
-        <div class="step-body collapsed" id="step-body-2">
+        <div class="step-body" id="step-body-2">
           <div class="src-toggle">
-            <input type="radio" name="source_type" id="src-s3" value="s3" checked />
+            <input type="radio" name="source_type" id="src-dhan" value="dhan" checked />
+            <label for="src-dhan">Dhan / NSE</label>
+            <input type="radio" name="source_type" id="src-s3" value="s3" />
             <label for="src-s3">S3</label>
             <input type="radio" name="source_type" id="src-db" value="database" />
-            <label for="src-db">Database</label>
+            <label for="src-db">PostgreSQL</label>
           </div>
           <div class="grid">
-            <div class="source-section active" id="section-s3">
+            <div class="source-section active" id="section-dhan">
+              <div class="field full">
+                <label for="dhan_symbols">NSE trading symbols (comma-separated)</label>
+                <textarea class="symbol-input" id="dhan_symbols" name="dhan_symbols" rows="2" maxlength="150000" placeholder="RELIANCE, TCS, HDFCBANK" aria-describedby="dhan-symbol-hint">{{ dhan_symbols|default('') }}</textarea>
+                <p class="source-help" id="dhan-symbol-hint">Enter up to 1,000 exact trading symbols. NSE equity is the default; use <code>IDX_I:NIFTY 50</code> for an index. Leave blank to use server-configured symbols, symbols.csv, or IDs.</p>
+                <div class="symbol-tools"><button type="button" class="top-btn" id="dhan-resolve-btn" onclick="resolveDhanSymbols()" disabled>Resolve symbols</button><span class="symbol-feedback" id="dhan-resolve-status" role="status">IDs are looked up automatically when you fetch a snapshot.</span></div>
+                <pre class="symbol-results" id="dhan-resolve-results" hidden></pre>
+                <p class="source-help">Resolve symbols reads the official public instrument list. It does not authenticate or fetch market prices. Futures and options require the exact full contract symbol; no fuzzy matching is used.</p>
+              </div>
+              <div class="field full">
+                <label for="dhan_snapshot_mode">Snapshot detail</label>
+                <select id="dhan_snapshot_mode" name="dhan_snapshot_mode"><option value="quote" selected>Quote — price, volume and market depth</option><option value="ohlc">OHLC — price and daily open/high/low/close</option><option value="ltp">LTP — last traded price</option></select>
+              </div>
+              <p class="source-help"><strong id="dhan-source-instruments">Checking server configuration…</strong> Public instrument IDs can be previewed above; brokerage credentials are never displayed.</p>
+              <p class="source-help snapshot-only-note"><strong>Current quote snapshot only.</strong> This fetches current data for today in India; it does not backfill historical dates or start a live feed.</p>
+            </div>
+            <div class="source-section" id="section-s3">
               <div class="field">
                 <label for="source_bucket">Source Bucket</label>
                 <input type="text" id="source_bucket" name="source_bucket"
@@ -2035,7 +2162,7 @@
               <label for="metadata_key">Metadata Sheet Key</label>
               <div class="combo-wrap">
                 <input type="text" id="metadata_key" name="metadata_key"
-                       placeholder="my_table_metadata.csv" />
+                       value="examples/dhan_market_snapshot.csv" placeholder="examples/dhan_market_snapshot.csv" readonly />
               </div>
             </div>
           </div>
@@ -2060,9 +2187,10 @@
       <!-- ── Schedule section ────────────────────────────── -->
       <div class="sched-section">
         <div class="sched-toggle-row">
-          <input type="checkbox" id="sched-enable" onchange="toggleSchedSection(this)" />
+          <input type="checkbox" id="sched-enable" onchange="toggleSchedSection(this)" disabled />
           <label for="sched-enable">Schedule this job</label>
         </div>
+        <p id="dhan-schedule-note" class="dhan-schedule-note">For scheduled Dhan snapshots, use the CLI with an external scheduler. This page runs one snapshot at a time; live collection and downstream schedules are separate.</p>
         <div class="sched-cron-wrap" id="sched-cron-wrap" style="display:none;">
           <label for="sched-cron">Cron Expression</label>
           <input type="text" id="sched-cron" placeholder="0 2 * * *"
@@ -2110,7 +2238,7 @@
           <div class="step-num" style="background:#1e1b18; box-shadow:0 2px 6px rgba(0,0,0,0.25);">B</div>
           <div class="step-info">
             <div class="step-name">Bronze Layer</div>
-            <div class="step-desc">Deduplication and merge from lake to bronze Iceberg table</div>
+            <div class="step-desc">Deduplicate and merge an existing Lake table. This step does not fetch Dhan data.</div>
           </div>
           <div class="step-badge" id="bronze-ready-badge">
             <div class="badge-dot"></div>
@@ -2149,7 +2277,7 @@
       </div>
 
       <button type="submit" class="btn-run-dark" id="bronze-run-btn" disabled>
-        &#9654;&nbsp; Run Ingestion Pipeline
+        &#9654;&nbsp; Run Bronze Layer
       </button>
       <div style="margin-top:8px;">
         <button type="button" class="btn-adhoc" id="adhoc-bronze-btn" disabled onclick="triggerAdhocBronze(this)" style="width:100%;">&#9654;&nbsp; Adhoc Bronze Layer</button>
@@ -2188,7 +2316,7 @@
         <div style="display:flex;align-items:center;gap:14px;margin-bottom:12px;flex-wrap:wrap;">
           <div id="sv-global-date-wrap" style="display:flex;align-items:center;gap:8px;">
             <label style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:0.6px;color:var(--muted);white-space:nowrap;">Snapshot Date</label>
-            <input type="date" id="sv-global-date" style="font-size:13px;padding:4px 8px;border-radius:6px;border:1px solid var(--border);background:var(--surface2);color:var(--fg);" oninput="svSyncGlobalDate(this.value);var gd=document.getElementById('gold_run_date');if(gd)gd.value=this.value;" />
+            <input type="date" id="sv-global-date" value="{{ trading_date|default('') }}" style="font-size:13px;padding:4px 8px;border-radius:6px;border:1px solid var(--border);background:var(--surface2);color:var(--fg);" oninput="svSyncGlobalDate(this.value);var gd=document.getElementById('gold_run_date');if(gd)gd.value=this.value;" />
           </div>
           <label style="display:flex;align-items:center;gap:6px;font-size:12px;cursor:pointer;color:var(--fg-muted);white-space:nowrap;">
             <input type="checkbox" id="sv-same-date" checked onchange="svToggleSameDate(this.checked)" />
@@ -2239,8 +2367,8 @@
             <option value="insert_overwrite">Insert Overwrite — DELETE + INSERT by snapshot_date</option>
           </select>
           <p style="font-size:11px;color:var(--muted);margin-top:5px;">
-            &#8594; Gold Load Strategy will be synced automatically:
-            <strong id="sv-gold-strategy-hint">Truncate</strong>
+            &#8594; Gold Publish Strategy will be synced automatically:
+            <strong id="sv-gold-strategy-hint">Replace</strong>
           </p>
         </div>
       </div>
@@ -2274,22 +2402,23 @@
           <strong>Manual (adhoc) runs</strong> use the date you enter above.
         </p>
 
-        <!-- DWH Gold Load Strategy (used when scheduler chains Silver → Gold) -->
+        <!-- Gold publication strategy (scheduler chains Silver → Gold) -->
         <div style="margin-top:12px;padding-top:10px;border-top:1px solid rgba(0,0,0,0.07);">
           <label style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.6px;color:var(--muted);">
-            DWH Gold Load Strategy
+            Gold Publish Strategy
           </label>
           <div class="src-toggle" style="margin-top:8px;">
-            <input type="radio" name="sv_load_strategy" id="sv-ls-append" value="append" checked
+            <input type="radio" name="sv_load_strategy" id="sv-ls-append" value="append"
                    onchange="svToggleSchedDateCol()" />
             <label for="sv-ls-append">Append</label>
-            <input type="radio" name="sv_load_strategy" id="sv-ls-truncate" value="truncate"
+            <input type="radio" name="sv_load_strategy" id="sv-ls-replace" value="replace" checked
                    onchange="svToggleSchedDateCol()" />
-            <label for="sv-ls-truncate">Truncate</label>
+            <label for="sv-ls-replace">Replace</label>
             <input type="radio" name="sv_load_strategy" id="sv-ls-di" value="delete_and_insert"
                    onchange="svToggleSchedDateCol()" />
-            <label for="sv-ls-di">Delete &amp; Insert</label>
+            <label for="sv-ls-di">Replace Date</label>
           </div>
+          <p style="font-size:11px;color:var(--muted);margin-top:6px;">Replace atomically publishes the full Silver table and is safe to replay. Append adds rows again on replay. Replace Date preserves other dates.</p>
           <div id="sv-sched-date-col-row" style="display:none;margin-top:10px;">
             <label for="sv-sched-date-col" style="font-size:12px;font-weight:600;">
               Date Column <span style="color:var(--red);">*</span>
@@ -2300,7 +2429,7 @@
                           border-radius:6px;border:1px solid var(--border);
                           background:var(--surface2);color:var(--fg);" />
             <p style="font-size:11px;color:var(--muted);margin-top:4px;">
-              Deletes rows where <em>date_column = run_date</em>, then inserts the full Silver partition.
+              Replaces rows for <em>date_column = run_date</em> with that Silver partition; other dates are preserved.
             </p>
           </div>
         </div>
@@ -2314,7 +2443,7 @@
 
     </div><!-- /panel-silver -->
 
-    <!-- ── Gold panel (Oracle ADW) ──────────────────────────── -->
+    <!-- ── Gold panel (Iceberg / Trino) ─────────────────────── -->
     <div id="panel-gold" style="display:none;">
 
     <form id="gold-form">
@@ -2324,8 +2453,8 @@
         <div class="step-header" style="cursor:default;">
           <div class="step-num" style="background:#2e2200; color:#e9a825; box-shadow:0 2px 6px rgba(0,0,0,0.25);">G</div>
           <div class="step-info">
-            <div class="step-name">Gold Layer — Oracle ADW Load</div>
-            <div class="step-desc">Loads Silver Iceberg table into Oracle Autonomous Data Warehouse</div>
+            <div class="step-name">Gold Layer — Iceberg Publication</div>
+            <div class="step-desc">Publishes Silver data as a Gold Iceberg table in MinIO, queried through Trino.</div>
           </div>
         </div>
         <div class="step-body">
@@ -2333,35 +2462,36 @@
             <div class="field">
               <label for="gold_app_name">Application Name</label>
               <input type="text" id="gold_app_name" name="application_name"
-                     placeholder="e.g. enigma_covid_19_us_states" />
+                     placeholder="e.g. nse_market_publish" />
             </div>
             <div class="field">
               <label for="gold_run_date">Run Date</label>
-              <input type="date" id="gold_run_date" name="run_date" oninput="var sd=document.getElementById('sv-global-date');if(sd){sd.value=this.value;svSyncGlobalDate(this.value);}" />
+              <input type="date" id="gold_run_date" name="run_date" value="{{ trading_date|default('') }}" oninput="var sd=document.getElementById('sv-global-date');if(sd){sd.value=this.value;svSyncGlobalDate(this.value);}" />
             </div>
           </div>
           <div class="grid" style="margin-top:14px;">
             <div class="field">
               <label for="gold_silver_table">Silver Table</label>
               <input type="text" id="gold_silver_table" name="silver_table"
-                     placeholder="e.g. enigma_aggregation_us_states (bare name or schema.table)" />
+                     placeholder="e.g. nse_market_summary (bare name or schema.table)" />
             </div>
             <div class="field">
-              <label for="gold_oracle_table">Oracle Target Table</label>
-              <input type="text" id="gold_oracle_table" name="oracle_table"
-                     placeholder="e.g. ENIGMA_US_STATES (auto-prefixed with dw_enigma.)" />
+              <label for="gold_target_table">Gold Target Table</label>
+              <input type="text" id="gold_target_table" name="gold_table"
+                     placeholder="e.g. nse_market_summary (schema: {{ gold_database|default('de_gold') }})" />
             </div>
           </div>
           <div style="margin-top:14px;">
-            <label style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:0.6px;color:var(--muted);">Load Strategy</label>
+            <label style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:0.6px;color:var(--muted);">Publish Strategy</label>
             <div class="src-toggle" style="margin-top:8px;">
-              <input type="radio" name="load_strategy" id="ls-append" value="append" checked onchange="toggleGoldDateCol();_tlSyncStrategy('gold')" />
+              <input type="radio" name="load_strategy" id="ls-append" value="append" onchange="toggleGoldDateCol();_tlSyncStrategy('gold')" />
               <label for="ls-append">Append</label>
-              <input type="radio" name="load_strategy" id="ls-truncate" value="truncate" onchange="toggleGoldDateCol();_tlSyncStrategy('gold')" />
-              <label for="ls-truncate">Truncate</label>
+              <input type="radio" name="load_strategy" id="ls-replace" value="replace" checked onchange="toggleGoldDateCol();_tlSyncStrategy('gold')" />
+              <label for="ls-replace">Replace</label>
               <input type="radio" name="load_strategy" id="ls-di" value="delete_and_insert" onchange="toggleGoldDateCol();_tlSyncStrategy('gold')" />
-              <label for="ls-di">Delete &amp; Insert</label>
+              <label for="ls-di">Replace Date</label>
             </div>
+            <p style="font-size:12px;color:var(--muted);margin-top:8px;">Replace atomically replaces the full Gold table and is safe to replay. Append can duplicate rows when replayed. Replace Date updates one run date and preserves all other dates.</p>
             <p style="font-size:11px;color:var(--muted);margin-top:5px;">
               &#8592; Silver Write Strategy synced:
               <strong id="gold-sv-strategy-hint">Overwrite</strong>
@@ -2375,26 +2505,16 @@
             </div>
             <div class="field">
               <label style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:0.6px;color:var(--muted);">Strategy info</label>
-              <p style="font-size:12px;color:var(--muted);margin:8px 0 0;">Deletes rows where <em>date_column = run_date</em>, then inserts the full Silver partition.</p>
+              <p style="font-size:12px;color:var(--muted);margin:8px 0 0;">Replaces the Gold rows for <em>date_column = run_date</em> with the matching Silver partition, preserving other dates.</p>
             </div>
           </div>
         </div>
       </div>
 
       <button type="submit" class="btn-run" id="gold-run-btn" style="background:#5a3d00;">
-        &#9654;&nbsp; Run DWH Gold Layer
+        &#9654;&nbsp; Publish Gold Layer
       </button>
     </form>
-
-    <div class="history-wrap" id="gold-history-card" style="margin-top:20px;">
-      <div class="history-header">
-        <div class="history-title">Gold Run History</div>
-        <button type="button" class="btn-history-toggle" id="gold-history-toggle-btn" onclick="toggleGoldHistory()">Show</button>
-      </div>
-      <div class="history-body" id="gold-history-list" style="display:none;">
-        <span class="history-empty">Enter an application name to load history.</span>
-      </div>
-    </div>
 
     </div><!-- /panel-gold -->
 
@@ -2491,6 +2611,26 @@
   let _activeLayer   = 'ingestion';
   var _activeTLLayer = 'silver';
 
+  function syncWorkspaceNavigation() {
+    const selected = _activePage === 'silver' ? _activeTLLayer : (_activeLayer === 'bronze' ? 'bronze' : 'lake');
+    ['lake','bronze','silver','gold'].forEach(layer => {
+      const button = document.getElementById('workspace-layer-' + layer);
+      if (!button) return;
+      button.classList.toggle('active', layer === selected);
+      if (layer === selected) button.setAttribute('aria-current', 'step');
+      else button.removeAttribute('aria-current');
+    });
+  }
+
+  function goToDataLayer(layer) {
+    if (layer === 'lake' || layer === 'bronze') {
+      setPage('bronze');
+      setLayer(layer === 'lake' ? 'ingestion' : 'bronze');
+    } else if (layer === 'silver' || layer === 'gold') {
+      setTLLayer(layer);
+    }
+  }
+
   function setPage(page) {
     _activePage = page;
     // Page tab highlight (gold tab removed from nav)
@@ -2511,6 +2651,7 @@
     document.getElementById('panel-silver').style.display    = (page === 'silver' && _activeTLLayer === 'silver')  ? '' : 'none';
     document.getElementById('panel-gold').style.display      = (page === 'silver' && _activeTLLayer === 'gold')    ? '' : 'none';
     if (page === 'bronze') setPipelineTab(_activeLayer === 'bronze' ? 'bronze' : 'ingestion');
+    syncWorkspaceNavigation();
   }
 
   function setLayer(layer) {
@@ -2523,30 +2664,33 @@
       if (n) n.classList.toggle('active', layer === l);
     });
     if (_activePage === 'bronze') setPipelineTab(layer);
+    syncWorkspaceNavigation();
   }
 
   function _tlSyncGoldFields() {
     var tgt = (document.getElementById('sv-target-table').value || '').trim();
     if (!tgt) return;
     var silverFld = document.getElementById('gold_silver_table');
-    var oracleFld = document.getElementById('gold_oracle_table');
-    if (silverFld) silverFld.value = tgt;
-    if (oracleFld) oracleFld.value = tgt.toUpperCase();
+    var goldFld = document.getElementById('gold_target_table');
+    var previous = _tlSyncGoldFields.lastTarget || '';
+    if (silverFld && (!silverFld.value || silverFld.value === previous)) silverFld.value = tgt;
+    if (goldFld && (!goldFld.value || goldFld.value === previous)) goldFld.value = tgt;
+    _tlSyncGoldFields.lastTarget = tgt;
     _tlSyncStrategy('silver');
   }
 
   // Mapping: Silver write strategy → Gold load strategy and vice-versa
-  var _SV_TO_GOLD = { overwrite: 'truncate', append: 'append', insert_overwrite: 'delete_and_insert' };
-  var _GOLD_TO_SV = { truncate: 'overwrite', append: 'append', delete_and_insert: 'insert_overwrite' };
+  var _SV_TO_GOLD = { overwrite: 'replace', append: 'append', insert_overwrite: 'delete_and_insert' };
+  var _GOLD_TO_SV = { replace: 'overwrite', append: 'append', delete_and_insert: 'insert_overwrite' };
 
-  var _GOLD_LABELS = { append: 'Append', truncate: 'Truncate', delete_and_insert: 'Delete & Insert' };
+  var _GOLD_LABELS = { append: 'Append', replace: 'Replace', delete_and_insert: 'Replace Date' };
   var _SV_LABELS   = { overwrite: 'Overwrite', append: 'Append', insert_overwrite: 'Insert Overwrite' };
 
   function _tlSyncStrategy(source) {
     if (source === 'silver') {
       var svEl = document.getElementById('sv-strategy');
       if (!svEl) return;
-      var goldVal = _SV_TO_GOLD[svEl.value] || 'append';
+      var goldVal = _SV_TO_GOLD[svEl.value] || 'replace';
       var radio = document.querySelector('input[name="load_strategy"][value="' + goldVal + '"]');
       if (radio) { radio.checked = true; toggleGoldDateCol(); }
       var svHint = document.getElementById('sv-gold-strategy-hint');
@@ -2588,10 +2732,10 @@
     { id: 'complete', done:  /--- Silver Exit 0 ---/i, fail: /--- Silver Exit 1 ---|\[silver\] ERROR/i },
   ];
   var TL_GOLD_STEPS = [
-    { id: 'connect',  start: /\[gold\] (Launching|.*Starting Oracle load)/i },
+    { id: 'connect',  start: /\[gold\] (Launching|Reading Silver)/i },
     { id: 'table',    start: /\[gold\] .*Table.*ensured/i },
-    { id: 'load',     start: /\[gold\] .*Inserted rows/i,        done: /\[gold\] .*Load complete/i },
-    { id: 'complete', done:  /--- (Gold|Oracle Load) Exit 0 ---/i, fail: /--- (Gold|Oracle Load) Exit [^0]|\[gold\] ERROR/i },
+    { id: 'load',     start: /\[gold\] .*Table.*ensured/i, done: /\[gold\] .*Publish completed/i },
+    { id: 'complete', done: /--- Gold Exit 0 ---/i, fail: /--- Gold Exit [^0]|\[gold\] ERROR/i },
   ];
   var tlsStepStatus = {};
   var tlgStepStatus = {};
@@ -2696,7 +2840,7 @@
       }
       if (g.done && g.done.test(line)) {
         _advanceTLGold(k, 'done');
-        if (/Gold Exit 0/i.test(line) || /Oracle Load Exit 0/i.test(line)) {
+        if (/Gold Exit 0/i.test(line)) {
           var gd3 = document.getElementById('tlg-dot'); if (gd3) gd3.className = 'dot done';
           var gt3 = document.getElementById('tlg-status-text'); if (gt3) gt3.textContent = 'Done';
         }
@@ -2722,14 +2866,15 @@
     var runDate     = (document.getElementById('sv-global-date')?.value || '').trim();
     var silverTable = (document.getElementById('gold_silver_table')?.value || '').trim()
                       || svPayload.target_table || '';
-    var oracleTable = (document.getElementById('gold_oracle_table')?.value || '').trim();
-    var loadStrat   = document.querySelector('input[name="load_strategy"]:checked')?.value || 'append';
+    var goldTable   = (document.getElementById('gold_target_table')?.value || '').trim();
+    var loadStrat   = document.querySelector('input[name="load_strategy"]:checked')?.value || 'replace';
     var dateCol     = (document.getElementById('gold_date_column')?.value || '').trim();
-    var goldAppName = (document.getElementById('gold_app_name')?.value || '').trim() || appName;
     var goldRunDate = (document.getElementById('gold_run_date')?.value || '').trim() || runDate;
 
     if (!silverTable) { alert('Set a Target Table Name in the Silver Transform tab first.'); return; }
-    if (!oracleTable) { alert('Fill in the Oracle Target Table in the Gold Load tab before running.'); return; }
+    if (!goldTable) { alert('Fill in the Gold Target Table before running.'); return; }
+    if (!goldRunDate) { alert('Run date is required.'); return; }
+    if (loadStrat === 'delete_and_insert' && !dateCol) { alert('Date column is required for Replace Date.'); return; }
 
     var btn = document.getElementById('tl-run-btn');
     btn.disabled = true; btn.textContent = '⏳ Running…';
@@ -2745,14 +2890,19 @@
     setNavDot('silver', 'running');
     setTimeout(refreshActiveJobs, 400);
 
-    // ── Phase 1: Silver Transform (same endpoint as Transform button) ──────────
-    var silverOk = false;
+    // The server owns both phases so publication continues after disconnect.
+    var silverOk = false, goldOk = false;
     try {
-      var resp1 = await fetch('/silver/run-transform', {
+      var resp1 = await fetch('/run-transform-load', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'X-CSRFToken': '{{ csrf_token() }}' },
-        body: JSON.stringify({ silver_payload: JSON.stringify(svPayload), app_name: appName, run_date: runDate })
+        body: JSON.stringify({
+          silver_payload: JSON.stringify(svPayload), app_name: appName, run_date: goldRunDate,
+          silver_table: silverTable, gold_table: goldTable,
+          load_strategy: loadStrat, date_column: dateCol
+        })
       });
+      if (!resp1.ok) throw new Error(await resp1.text());
       var r1 = resp1.body.getReader(), d1 = new TextDecoder(), b1 = '';
       while (true) {
         var c1 = await r1.read();
@@ -2763,69 +2913,14 @@
       }
       if (b1) { appendLog(b1); processTLLine(b1); }
       silverOk = tlsStepStatus['complete'] === 'done';
+      goldOk = tlgStepStatus['complete'] === 'done';
     } catch(e) {
-      var errLine = '[silver] ERROR: ' + e.message;
+      var errLine = '[gold] ERROR: ' + e.message;
       appendLog(errLine); processTLLine(errLine);
     }
 
-    if (silverOk) {
-      setNavDot('tl-silver', 'done');
-      setNavDot('silver', 'done');
-    } else {
-      setNavDot('tl-silver', 'fail');
-      setNavDot('silver', 'fail');
-      btn.disabled = false; btn.innerHTML = '&#9654;&nbsp; Run Transform &amp; Load';
-      refreshActiveJobs();
-      return;
-    }
-
-    // ── Phase 2: Gold Oracle Load ─────────────────────────────────────────────
-    // Flush silver logs, switch UI to Gold layer before gold logs start
-    clearLog();
-    document.getElementById('log-panel-title').textContent = 'Gold Load Logs';
-    setTLLayer('gold');
-    setTLProgressTab('gold');
-    setNavDot('tl-gold', 'running');
-    setNavDot('gold', 'running');
-    // Emit the launch line so the 'connect' step dot activates
-    var launchLine = '[gold] Launching Oracle load container...';
-    appendLog(launchLine); processTLLine(launchLine);
-
-    var goldOk = false;
-    try {
-      var params = new URLSearchParams({
-        application_name: goldAppName, run_date: goldRunDate,
-        silver_table: silverTable, oracle_table: oracleTable,
-        load_strategy: loadStrat, date_column: dateCol,
-      });
-      var resp2 = await fetch('/run-oracle', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'X-CSRFToken': '{{ csrf_token() }}' },
-        body: params.toString()
-      });
-      var r2 = resp2.body.getReader(), d2 = new TextDecoder(), b2 = '';
-      while (true) {
-        var c2 = await r2.read();
-        if (c2.done) break;
-        b2 += d2.decode(c2.value, { stream: true });
-        var ls2 = b2.split('\n'); b2 = ls2.pop();
-        ls2.forEach(function(ln) {
-          if (!ln) return;
-          var prefixed = /^\[gold\]/i.test(ln) ? ln : '[gold] ' + ln;
-          appendLog(prefixed); processTLLine(prefixed);
-          if (/--- Oracle Load Exit 0 ---/i.test(ln)) goldOk = true;
-        });
-      }
-      if (b2) {
-        var pf = /^\[gold\]/i.test(b2) ? b2 : '[gold] ' + b2;
-        appendLog(pf); processTLLine(pf);
-        if (/--- Oracle Load Exit 0 ---/i.test(b2)) goldOk = true;
-      }
-    } catch(e) {
-      var gErrLine = '[gold] ERROR: ' + e.message;
-      appendLog(gErrLine); processTLLine(gErrLine);
-    }
-
+    setNavDot('tl-silver', silverOk ? 'done' : 'fail');
+    setNavDot('silver', silverOk ? 'done' : 'fail');
     setNavDot('tl-gold', goldOk ? 'done' : 'fail');
     setNavDot('gold', goldOk ? 'done' : 'fail');
     btn.disabled = false; btn.innerHTML = '&#9654;&nbsp; Run Transform &amp; Load';
@@ -2882,23 +2977,23 @@
       nameEl.className   = `conn-name ${state}`;
       nameEl.textContent = label;
     };
-    setConn('minio', 'pinging', 'MinIO');
-    setConn('vault', 'pinging', 'Vault');
+    setConn('minio', 'pinging', 'Storage: checking');
+    setConn('vault', 'pinging', 'Vault: checking');
     try {
       const r    = await fetch('/connectivity');
       const data = await r.json();
       const st   = v => v === 'ok' ? 'ok' : 'err';
-      setConn('minio', st(data.minio), data.minio === 'ok' ? 'MinIO' : 'MinIO — ' + data.minio);
-      setConn('vault', st(data.vault), data.vault === 'ok' ? 'Vault' : 'Vault — ' + data.vault);
+      setConn('minio', st(data.minio), data.minio === 'ok' ? 'Storage: reachable' : 'Storage: unavailable');
+      setConn('vault', st(data.vault), data.vault === 'ok' ? 'Vault: unsealed' : 'Vault: unavailable');
     } catch {
-      setConn('minio', 'err', 'MinIO — unreachable');
-      setConn('vault', 'err', 'Vault — unreachable');
+      setConn('minio', 'err', 'Storage: unreachable');
+      setConn('vault', 'err', 'Vault: unreachable');
     }
   }
   checkConnectivity();
   setInterval(checkConnectivity, 30000);
   setPage('bronze'); // bootstrap main-panel class + panel visibility
-  _tlSyncStrategy('silver'); // align Gold radio + hints to Silver default (overwrite → truncate)
+  _tlSyncStrategy('silver'); // align Gold radio + hints to Silver default (overwrite → replace)
 
   // ── Log panel ────────────────────────────────────────────
   let _logOpen = false;
@@ -3094,15 +3189,311 @@
     if (e.key === 'Escape' && document.getElementById('sj-overlay').classList.contains('open')) closeSchedPage();
   });
 
-  // ── Source toggle ────────────────────────────────────────
-  document.querySelectorAll('input[name="source_type"]').forEach(r =>
-    r.addEventListener('change', () => {
-      const s3 = r.value === 's3';
-      document.getElementById('section-s3').classList.toggle('active', s3);
-      document.getElementById('section-db').classList.toggle('active', !s3);
+  // ── NSE workspace: local setup inspection, never a Dhan API request ──
+  var _dhanStatus = null;
+  var _dhanModeTouched = false;
+  var _ingestionRunning = false;
+  var _currentSourceType = 'dhan';
+  var _sourceFormState = {};
+  var _dhanResolving = false;
+  var _dhanResolution = null;
+
+  function indiaTradingDate(now = new Date()) {
+    const parts = new Intl.DateTimeFormat('en-GB', {
+      timeZone: 'Asia/Kolkata', year: 'numeric', month: '2-digit', day: '2-digit'
+    }).formatToParts(now);
+    const part = type => parts.find(value => value.type === type).value;
+    return part('year') + '-' + part('month') + '-' + part('day');
+  }
+
+  function activeSourceType() {
+    return document.querySelector('input[name="source_type"]:checked')?.value || 'dhan';
+  }
+
+  function dhanSymbolInput() {
+    const raw = val('dhan_symbols');
+    if (!raw) return {provided: false, valid: true, count: 0, key: ''};
+    const parts = raw.split(',');
+    if (parts.length > 1000 || raw.length > 150000) return {provided: true, valid: false, count: 0, key: ''};
+    const keys = new Set();
+    for (const part of parts) {
+      const fields = part.trim().toUpperCase().split(':');
+      if (fields.length > 2) return {provided: true, valid: false, count: 0, key: ''};
+      const segment = fields.length === 2 ? fields[0].trim() : 'NSE_EQ';
+      const symbol = fields[fields.length - 1].trim();
+      if (!['NSE_EQ','NSE_FNO','NSE_CURRENCY','IDX_I'].includes(segment) || !symbol || symbol.length > 128 || !/^[A-Z0-9&_.\/() -]+$/.test(symbol)) return {provided: true, valid: false, count: 0, key: ''};
+      keys.add(segment + ':' + symbol);
+    }
+    return {provided: true, valid: true, count: keys.size, key: [...keys].join(',')};
+  }
+
+  function effectiveDhanReady(status = _dhanStatus) {
+    if (!status) return false;
+    const symbols = dhanSymbolInput();
+    return symbols.provided ? symbols.valid && status.credentials_ready === true : status.ready_to_run === true;
+  }
+
+  function dhanSymbolErrorMessage(code) {
+    const messages = {
+      invalid_symbols: 'The symbol list is invalid. Check the exact trading symbols and supported segment prefixes.',
+      unknown_symbol: 'A symbol was not found in the official list. Check its exact NSE trading symbol.',
+      ambiguous_symbol: 'A symbol matched more than one instrument. Use the exact trading symbol and segment prefix.',
+      selection_conflict: 'Configure only one server selection: symbols, symbols.csv, or instrument IDs. Typed symbols override that selection.',
+      symbols_file_invalid: 'The server symbols.csv is invalid. Use UTF-8 text with a single symbol header and one exact NSE symbol per row.',
+      symbols_file_unavailable: 'The server symbols.csv could not be read. Check DHAN_SYMBOLS_FILE and its read-only Docker mount.',
+      master_unavailable: 'The official instrument list is temporarily unavailable. Retry resolution later.'
+    };
+    return Object.hasOwn(messages, code) ? messages[code] : null;
+  }
+
+  function syncDhanSymbolControls() {
+    const symbols = dhanSymbolInput();
+    const serverSymbols = !symbols.provided && _dhanStatus?.symbols.configured && _dhanStatus.symbols.syntax_valid;
+    document.getElementById('dhan-resolve-btn').disabled = _dhanResolving || activeSourceType() !== 'dhan' || !(symbols.provided ? symbols.valid : serverSymbols);
+    const hint = document.getElementById('dhan-symbol-hint');
+    hint.className = 'source-help' + (symbols.valid ? '' : ' symbol-feedback error');
+    hint.textContent = symbols.valid
+      ? 'Up to 1,000 exact comma-separated symbols. Bare names use NSE_EQ; indices need a prefix such as IDX_I:NIFTY 50. Blank uses server symbols, symbols.csv, or IDs.'
+      : 'Use at most 1,000 nonempty comma-separated trading symbols and a supported optional segment prefix.';
+  }
+
+  function onDhanSymbolsChanged() {
+    _dhanResolution = null;
+    const symbols = dhanSymbolInput();
+    const results = document.getElementById('dhan-resolve-results');
+    results.hidden = true;
+    results.textContent = '';
+    const feedback = document.getElementById('dhan-resolve-status');
+    feedback.className = 'symbol-feedback';
+    feedback.textContent = symbols.provided
+      ? (symbols.valid ? symbols.count + ' symbol(s) entered; IDs will be looked up when you resolve or fetch.' : 'Correct the symbol list before resolving or fetching.')
+      : 'Using server configuration. IDs are looked up automatically when you fetch a snapshot.';
+    syncDhanSymbolControls();
+    if (_dhanStatus) renderDhanStatus(_dhanStatus);
+    validateStages();
+  }
+
+  async function resolveDhanSymbols() {
+    const symbols = dhanSymbolInput();
+    const serverSymbols = !symbols.provided && _dhanStatus?.symbols.configured && _dhanStatus.symbols.syntax_valid;
+    if (_dhanResolving || !(symbols.provided ? symbols.valid : serverSymbols)) return;
+    _dhanResolving = true;
+    const feedback = document.getElementById('dhan-resolve-status');
+    const results = document.getElementById('dhan-resolve-results');
+    feedback.className = 'symbol-feedback';
+    feedback.textContent = 'Resolving the official public instrument list…';
+    results.hidden = true;
+    syncDhanSymbolControls();
+    let failureMessage = 'Symbol resolution failed. Check the list or retry later.';
+    try {
+      const response = await fetch('/dhan/resolve', {
+        method: 'POST', credentials: 'same-origin', cache: 'no-store',
+        headers: {'Content-Type': 'application/x-www-form-urlencoded', 'X-CSRFToken': '{{ csrf_token() }}'},
+        body: new URLSearchParams({symbols: val('dhan_symbols')}).toString()
+      });
+      let payload;
+      try {payload = await response.json();} catch {payload = {};}
+      if (!response.ok) {
+        failureMessage = dhanSymbolErrorMessage(payload?.code) || failureMessage;
+        throw new Error('Symbol resolution rejected');
+      }
+      const rows = payload?.instruments;
+      if (!Array.isArray(rows) || rows.length < 1 || rows.length > 1000 || payload.count !== rows.length) {
+        failureMessage = 'The instrument list could not be validated. Retry resolution later.';
+        throw new Error('Invalid instrument response');
+      }
+      const safeRows = rows.map(row => {
+        const symbol = typeof row?.symbol === 'string' ? row.symbol.trim().toUpperCase() : '';
+        const segment = row?.exchange_segment;
+        const id = String(row?.security_id || '');
+        if (!symbol || symbol.length > 128 || !/^[A-Z0-9&_.\/() -]+$/.test(symbol) || !['NSE_EQ','NSE_FNO','NSE_CURRENCY','IDX_I'].includes(segment) || !/^[1-9][0-9]{0,15}$/.test(id)) {
+          failureMessage = 'The instrument list could not be validated. Retry resolution later.';
+          throw new Error('Invalid instrument response');
+        }
+        return {symbol, segment, id};
+      });
+      if (dhanSymbolInput().key !== symbols.key) return;
+      _dhanResolution = {key: symbols.key, count: safeRows.length};
+      results.textContent = safeRows.map(row => row.symbol + ' → ' + row.segment + ':' + row.id).join('\n');
+      results.hidden = false;
+      feedback.textContent = safeRows.length + ' symbol(s) resolved using the public list. Market-data access has not been verified.';
+      if (_dhanStatus) renderDhanStatus(_dhanStatus);
+    } catch {
+      if (dhanSymbolInput().key === symbols.key) {
+        _dhanResolution = null;
+        feedback.className = 'symbol-feedback error';
+        feedback.textContent = failureMessage;
+        results.textContent = '';
+      }
+    } finally {
+      _dhanResolving = false;
+      syncDhanSymbolControls();
+    }
+  }
+
+  function safeDhanStatus(data) {
+    const authentication = data.authentication || {};
+    const instruments = data.instruments || {};
+    const symbols = data.symbols || {};
+    const count = Number.isSafeInteger(instruments.count) && instruments.count > 0 ? instruments.count : 0;
+    const symbolCount = Number.isSafeInteger(symbols.count) && symbols.count > 0 && symbols.count <= 1000 ? symbols.count : 0;
+    return {
+      configured: data.configured === true,
+      ready_to_run: data.ready_to_run === true && ((instruments.valid === true && count > 0) || (symbols.configured === true && symbols.syntax_valid === true && symbolCount > 0)),
+      credentials_ready: data.credentials_ready === true,
+      client_id_configured: data.client_id_configured === true,
+      authentication: {
+        access_token_configured: authentication.access_token_configured === true,
+        token_file_present: authentication.token_file_present === true,
+        pin_totp_configured: authentication.pin_totp_configured === true,
+        oauth_configured: authentication.oauth_configured === true,
+        token_expired: typeof authentication.token_expired === 'boolean' ? authentication.token_expired : null,
+        method: ['missing','access_token','token_file','pin_totp','oauth_consent_required'].includes(authentication.method) ? authentication.method : 'missing',
+      },
+      instruments: {count, valid: instruments.valid === true},
+      symbols: {configured: symbols.configured === true, syntax_valid: symbols.syntax_valid === true, count: symbolCount},
+      selection_mode: ['symbols','symbols_file','security_ids','missing','conflict'].includes(instruments.selection_mode || data.selection_mode) ? (instruments.selection_mode || data.selection_mode) : 'missing',
+      resolution_required: instruments.resolution_required === true || data.resolution_required === true,
+      snapshot_mode: ['quote','ohlc','ltp'].includes(data.snapshot_mode) ? data.snapshot_mode : 'quote',
+      trading_date: /^\d{4}-\d{2}-\d{2}$/.test(data.trading_date || '') ? data.trading_date : indiaTradingDate(),
+      missing: Array.isArray(data.missing) ? [...new Set(data.missing.filter(key => typeof key === 'string' && /^DHAN_[A-Z0-9_]{1,58}$/.test(key)))] : [],
+    };
+  }
+
+  function renderDhanStatus(status) {
+    const state = document.getElementById('dhan-setup-state');
+    const missing = document.getElementById('dhan-missing-config');
+    if (!status) {
+      state.textContent = 'Setup status unavailable';
+      state.className = 'setup-state unavailable';
+      missing.textContent = 'Could not inspect local setup. Recreate the UI and refresh setup.';
+      missing.hidden = false;
+      document.getElementById('dhan-client-status').textContent = 'not checked';
+      document.getElementById('dhan-auth-status').textContent = 'not checked';
+      document.getElementById('dhan-instrument-count').textContent = 'not checked';
+      document.getElementById('dhan-source-instruments').textContent = 'Local setup must be checked before fetching.';
+      return;
+    }
+    const selection = dhanSymbolInput();
+    const ready = effectiveDhanReady(status);
+    state.textContent = ready ? 'Configured · not verified' : (status.configured ? 'Configured · attention needed' : 'Missing configuration');
+    state.className = 'setup-state' + (ready ? '' : ' missing');
+    document.getElementById('dhan-client-status').textContent = status.client_id_configured ? 'configured' : 'missing';
+    const auth = status.authentication;
+    let authLabel = 'missing';
+    if (auth.method === 'pin_totp') authLabel = auth.token_expired ? 'PIN / TOTP renewal configured; previous token expired' : 'PIN / TOTP renewal configured';
+    else if (auth.method === 'oauth_consent_required') authLabel = 'browser consent required';
+    else if (auth.method === 'access_token' || auth.method === 'token_file') {
+      const saved = auth.method === 'token_file';
+      if (auth.token_expired) authLabel = saved ? 'saved token expired' : 'token expired';
+      else if (saved && (status.missing.includes('DHAN_ACCESS_TOKEN_FILE') || status.missing.includes('DHAN_CLIENT_ID'))) authLabel = 'saved token needs attention';
+      else authLabel = auth.token_expired === null ? (saved ? 'saved token; expiry unverified' : 'token; expiry unverified') : (saved ? 'saved token configured' : 'token configured');
+    }
+    document.getElementById('dhan-auth-status').textContent = authLabel;
+    const preview = _dhanResolution && _dhanResolution.key === selection.key ? _dhanResolution : null;
+    const serverSymbolLabel = status.selection_mode === 'symbols_file' ? ' CSV symbols' : ' server symbols';
+    const countLabel = selection.provided
+      ? (selection.valid ? (preview ? preview.count + ' resolved' : selection.count + ' symbols entered') : 'invalid symbol list')
+      : (status.symbols.configured ? (status.symbols.syntax_valid ? status.symbols.count + serverSymbolLabel : (status.selection_mode === 'symbols_file' ? 'symbols.csv needs attention' : 'invalid server symbols')) : (status.instruments.valid ? status.instruments.count + ' configured' : 'missing or invalid'));
+    document.getElementById('dhan-instrument-count').textContent = countLabel;
+    document.getElementById('dhan-source-instruments').textContent = selection.provided
+      ? (selection.valid ? countLabel + '; market-data access remains unverified.' : 'Correct the symbol list to continue.')
+      : (status.symbols.configured ? (status.selection_mode === 'symbols_file' ? 'Server symbols.csv selection; IDs are looked up when you resolve or fetch.' : 'Server symbols will be resolved automatically when you fetch.') : (status.instruments.valid ? status.instruments.count + ' server instrument ID(s) configured.' : 'Enter NSE symbols above or configure a server selection.'));
+    const missingKeys = selection.provided && selection.valid ? status.missing.filter(key => !['DHAN_SYMBOLS','DHAN_SYMBOLS_FILE','DHAN_INSTRUMENTS','DHAN_INSTRUMENT_SELECTION'].includes(key)) : status.missing;
+    missing.textContent = missingKeys.length ? 'Missing or invalid settings: ' + missingKeys.join(', ') : (ready ? '' : 'Usable local credentials and valid symbols or instrument IDs are required.');
+    missing.hidden = !missing.textContent;
+    document.getElementById('nse-trading-date').textContent = status.trading_date;
+  }
+
+  async function refreshDhanStatus() {
+    const button = document.getElementById('dhan-status-refresh');
+    button.disabled = true;
+    document.getElementById('dhan-setup-state').textContent = 'Checking local configuration';
+    _dhanStatus = null;
+    syncDhanSymbolControls();
+    validateStages();
+    try {
+      const response = await fetch('/dhan/status', {cache: 'no-store', credentials: 'same-origin'});
+      if (!response.ok) throw new Error('Local status unavailable');
+      _dhanStatus = safeDhanStatus(await response.json());
+      if (!_dhanModeTouched) document.getElementById('dhan_snapshot_mode').value = _dhanStatus.snapshot_mode;
+      if (activeSourceType() === 'dhan') document.getElementById('ingest_date').value = _dhanStatus.trading_date;
+      renderDhanStatus(_dhanStatus);
+    } catch {
+      _dhanStatus = null;
+      renderDhanStatus(null);
+    } finally {
+      button.disabled = false;
+      syncDhanSymbolControls();
       validateStages();
-    })
+      syncBronzeFields();
+    }
+  }
+
+  function applySourceMode(sourceType) {
+    if (!['dhan','s3','database'].includes(sourceType)) return;
+    const fieldIds = ['application_name','ingest_date','metadata_key','write_mode','dhan_symbols'];
+    if (_currentSourceType !== sourceType) {
+      _sourceFormState[_currentSourceType] = Object.fromEntries(fieldIds.map(id => [id, val(id)]));
+      const defaults = sourceType === 'dhan'
+        ? {application_name: 'nse_market_snapshot', ingest_date: indiaTradingDate(), metadata_key: 'examples/dhan_market_snapshot.csv', write_mode: 'overwrite', dhan_symbols: ''}
+        : {application_name: '', ingest_date: indiaTradingDate(), metadata_key: '', write_mode: 'overwrite', dhan_symbols: ''};
+      const saved = _sourceFormState[sourceType] || defaults;
+      fieldIds.forEach(id => {document.getElementById(id).value = saved[id];});
+      document.getElementById('write_mode_sel').value = saved.write_mode;
+    }
+    _currentSourceType = sourceType;
+    const dhan = sourceType === 'dhan';
+    document.getElementById('section-dhan').classList.toggle('active', dhan);
+    document.getElementById('section-s3').classList.toggle('active', sourceType === 's3');
+    document.getElementById('section-db').classList.toggle('active', sourceType === 'database');
+    document.getElementById('dhan_snapshot_mode').disabled = !dhan;
+    document.getElementById('dhan_symbols').disabled = !dhan;
+    const dateInput = document.getElementById('ingest_date');
+    dateInput.readOnly = dhan;
+    document.getElementById('metadata_key').readOnly = dhan;
+    if (dhan) {
+      dateInput.value = _dhanStatus?.trading_date || indiaTradingDate();
+      document.getElementById('metadata_key').value = 'examples/dhan_market_snapshot.csv';
+      document.getElementById('step-body-2').classList.remove('collapsed');
+      document.getElementById('step-chevron-2').classList.add('open');
+    }
+    document.getElementById('run-btn').textContent = dhan ? '▶ Fetch snapshot (Lake + Bronze)' : '▶ Run Ingestion Pipeline';
+    document.getElementById('adhoc-ing-btn').textContent = dhan ? '▶ Fetch snapshot (Lake only)' : '▶ Adhoc Ingestion';
+    const schedule = document.getElementById('sched-enable');
+    schedule.disabled = dhan;
+    if (dhan) {
+      schedule.checked = false;
+      document.getElementById('sched-cron-wrap').style.display = 'none';
+      document.getElementById('save-sched-btn').style.display = 'none';
+    }
+    document.getElementById('dhan-schedule-note').hidden = !dhan;
+    syncDhanSymbolControls();
+    if (_dhanStatus) renderDhanStatus(_dhanStatus);
+    validateStages();
+    syncBronzeFields();
+  }
+
+  function initializeNseWorkspace() {
+    const today = indiaTradingDate();
+    document.getElementById('nse-trading-date').textContent = today;
+    ['ingest_date','sv-global-date','gold_run_date'].forEach(id => {
+      const input = document.getElementById(id);
+      if (input && !input.value) input.value = today;
+    });
+    applySourceMode(activeSourceType());
+    refreshDhanStatus();
+  }
+
+  document.querySelectorAll('input[name="source_type"]').forEach(radio =>
+    radio.addEventListener('change', () => applySourceMode(radio.value))
   );
+  document.getElementById('dhan_snapshot_mode').addEventListener('change', () => {
+    _dhanModeTouched = true;
+    validateStages();
+  });
+  document.getElementById('dhan_symbols').addEventListener('input', onDhanSymbolsChanged);
+  document.addEventListener('DOMContentLoaded', initializeNseWorkspace);
 
   // ── Step accordion ───────────────────────────────────────
   function toggleStep(n) {
@@ -3117,11 +3508,13 @@
   function val(id) { return (document.getElementById(id)?.value || '').trim(); }
 
   function getStageValid(n) {
-    if (n === 1) return val('application_name') !== '' && val('ingest_date') !== '';
+    if (n === 1) return val('application_name') !== '' && val('ingest_date') !== '' &&
+      (activeSourceType() !== 'dhan' || val('ingest_date') === indiaTradingDate());
     if (n === 2) {
-      const s3 = document.getElementById('src-s3').checked;
+      const sourceType = activeSourceType();
       const meta = val('metadata_key') !== '';
-      if (s3) return val('source_bucket') !== '' && val('source_key') !== '' && meta;
+      if (sourceType === 'dhan') return effectiveDhanReady() && meta && ['quote','ohlc','ltp'].includes(val('dhan_snapshot_mode'));
+      if (sourceType === 's3') return val('source_bucket') !== '' && val('source_key') !== '' && meta;
       return val('source_table_name') !== '' && meta;
     }
     return false;
@@ -3137,19 +3530,20 @@
       const badge = document.getElementById(`step-badge-${n}`);
       badge.classList.toggle('valid',   valid);
       badge.classList.toggle('invalid', !valid);
-      badge.querySelector('.badge-label').textContent = valid ? 'Complete' : 'Incomplete';
+      const validLabel = activeSourceType() === 'dhan' && n === 2 ? 'Configured' : 'Complete';
+      badge.querySelector('.badge-label').textContent = valid ? validLabel : 'Incomplete';
 
       // Summary row
       document.getElementById(`sum-dot-${n}`).className    = `summary-dot ${valid ? 'valid' : 'invalid'}`;
       const sl = document.getElementById(`sum-status-${n}`);
-      sl.textContent = valid ? 'Complete' : 'Incomplete';
+      sl.textContent = valid ? validLabel : 'Incomplete';
       sl.className   = `summary-status ${valid ? 'valid' : 'invalid'}`;
     }
-    document.getElementById('run-btn').disabled      = !allValid;
-    document.getElementById('adhoc-ing-btn').disabled = !allValid;
+    document.getElementById('run-btn').disabled      = !allValid || _ingestionRunning;
+    document.getElementById('adhoc-ing-btn').disabled = !allValid || _ingestionRunning;
     // Bronze adhoc needs at least app name + run date (synced from Step 1)
     const bronzeReady = val('application_name') !== '' && val('ingest_date') !== '';
-    document.getElementById('adhoc-bronze-btn').disabled = !bronzeReady;
+    document.getElementById('adhoc-bronze-btn').disabled = !bronzeReady || _ingestionRunning;
   }
 
   // Watch all required inputs
@@ -3165,16 +3559,16 @@
     _updateSchedBtnLabel();
   });
 
-  // Default date
-  document.getElementById('ingest_date').value = new Date().toISOString().slice(0, 10);
+  // Dates follow the NSE trading day, independent of the browser's timezone.
+  document.getElementById('ingest_date').value = indiaTradingDate();
   validateStages();
 
   // ── Pipeline step definitions ────────────────────────────
   const STEPS = [
-    { id: 'connectivity', start: /Checking (source S3|Supabase|MinIO) connectivity/,       done: /All connectivity checks passed/,  fail: /Source S3 connection error|Supabase connectivity check failed|MinIO connection error/ },
+    { id: 'connectivity', start: /Checking (source S3|Supabase|MinIO|Dhan) connectivity/, done: /All connectivity checks passed/, fail: /Source S3 connection error|Supabase connectivity check failed|MinIO connection error|DhanApiError|DhanConfigError|Dhan .*failed \(HTTP \d{3}\)|Dhan .*request could not be completed|Dhan Data API plan is not active/i },
     { id: 'spark',        start: /Building SparkSession/,                                   done: /SparkSession created/,            fail: /SparkException|Failed to start Spark/ },
     { id: 'metadata',     start: /Reading metadata sheet/,                                  done: /Loaded metadata with/,            fail: /Metadata sheet missing|missing required columns/ },
-    { id: 'source',       start: /Reading (CSV|JSON|Parquet) file|Reading database table/,  done: /Loaded \d+ columns/,              fail: /Path does not exist|AnalysisException|JDBC.*error/i },
+    { id: 'source',       start: /Reading (CSV|JSON|Parquet) file|Reading database table|Reading Dhan (quote|ohlc|ltp) snapshot/, done: /Loaded \d+ columns|Loaded \d+ Dhan market-data rows/, fail: /Path does not exist|AnalysisException|JDBC.*error|Dhan snapshot omitted/i },
     { id: 'schema',       start: /Loaded \d+ columns/,                                     done: /Schema validation passed/,        fail: /Schema validation failed|Schema mismatch/ },
     { id: 'pii',          start: /Exporting Transit key|Reading KV secret|Hashed column|Masked column|encrypted/, done: /Writing Iceberg table/, fail: /key not exportable|vault.*error/i },
     { id: 'write',        start: /Writing Iceberg table/,                                   done: /Write complete/,                  fail: /Write.*fail|IcebergException/i },
@@ -3369,7 +3763,26 @@
   metaKeyCombo.refresh();
 
   // ── Pipeline runner (shared by all three ingestion buttons) ─────────────
+  async function ingestionRequestError(response) {
+    const fallback = activeSourceType() === 'dhan'
+      ? "Dhan snapshot request was rejected. Refresh setup and check today's India date, authentication, instruments, and mode."
+      : 'Ingestion request was rejected. Check the source and metadata settings.';
+    try {
+      const payload = await response.json();
+      if (activeSourceType() === 'dhan' && dhanSymbolErrorMessage(payload?.code)) return dhanSymbolErrorMessage(payload.code);
+      // Only backend-authored static validation messages may enter the log.
+      const allowed = [
+        'Invalid or incomplete ingestion settings.',
+        "Dhan snapshot settings are incomplete or invalid. Check setup status, today's India date, and the selected instruments/mode. Credentials must remain on the server."
+      ];
+      if (allowed.includes(payload?.error)) return payload.error;
+    } catch { /* HTML/session-expiry responses use the static guidance. */ }
+    return fallback;
+  }
+
   async function _runIngestionCore(triggerBtn, skipBronze) {
+    if (_ingestionRunning || !getStageValid(1) || !getStageValid(2)) return;
+    _ingestionRunning = true;
     const form   = document.getElementById('pipeline-form');
     const btn    = triggerBtn;
     const dot    = document.getElementById('dot');
@@ -3405,6 +3818,7 @@
 
     try {
       const res    = await fetch('/run', { method: 'POST', body: new FormData(form) });
+      if (!res.ok) throw new Error(await ingestionRequestError(res));
       const reader = res.body.getReader();
       const dec    = new TextDecoder();
       let   buffer = '';
@@ -3488,9 +3902,11 @@
       }
     } catch (err) {
       dot.className = 'dot err'; status.textContent = `Error: ${err.message}`;
+      appendLog(`[ingestion] ERROR: ${err.message}`);
       STEPS.forEach(s => { if (stepStatus[s.id] === 'running') setStep(s.id, 'fail'); });
       setNavDot('ingestion', 'fail');
     } finally {
+      _ingestionRunning = false;
       document.getElementById('skip_bronze_flag').value = '0'; // reset flag
       document.getElementById('log-toggle-btn').classList.remove('running');
       validateStages(); // re-enables buttons based on form validity
@@ -3527,6 +3943,7 @@
   };
 
   function _ingNormalizeName() {
+    if (activeSourceType() === 'dhan') return;
     const el = document.getElementById('application_name');
     if (!el) return;
     const v = el.value.trim();
@@ -3559,11 +3976,8 @@
     const metaKey   = val('metadata_key');
     const writeMode = document.getElementById('write_mode').value || 'overwrite';
 
-    // Derive base name (strip Ingestion_ prefix if present) for Bronze_
-    const baseName    = appName.startsWith('Ingestion_') ? appName.slice('Ingestion_'.length) : appName;
-    const bronzeName  = baseName ? 'Bronze_' + baseName : '';
-
-    document.getElementById('bronze_app_name').value     = bronzeName;
+    // Bronze reads the same Lake table; a display prefix would change its key.
+    document.getElementById('bronze_app_name').value     = appName;
     document.getElementById('bronze_run_date').value     = runDate;
     document.getElementById('bronze_metadata_key').value = metaKey;
 
@@ -3577,7 +3991,7 @@
     badge.classList.toggle('valid',   ready);
     badge.classList.toggle('invalid', !ready && (appName !== '' || runDate !== ''));
     badge.querySelector('.badge-dot').style.background = ready ? 'var(--green)' : '';
-    badge.querySelector('.badge-label').textContent    = ready ? 'Ready' : 'Waiting';
+    badge.querySelector('.badge-label').textContent    = ready ? 'Details set' : 'Waiting';
 
     document.getElementById('bronze-run-btn').disabled = !ready;
 
@@ -3805,6 +4219,12 @@
   }
 
   function toggleSchedSection(cb) {
+    if (activeSourceType() === 'dhan') {
+      cb.checked = false;
+      document.getElementById('sched-cron-wrap').style.display = 'none';
+      document.getElementById('save-sched-btn').style.display = 'none';
+      return;
+    }
     const wrap = document.getElementById('sched-cron-wrap');
     const btn  = document.getElementById('save-sched-btn');
     wrap.style.display = cb.checked ? '' : 'none';
@@ -3825,11 +4245,15 @@
     const cronVal  = input.value.trim();
     const cronOk   = /^(\S+\s+){4}\S+$/.test(cronVal);
     const runValid = !document.getElementById('run-btn').disabled;
-    if (btn) btn.disabled = !(runValid && cronOk);
+    if (btn) btn.disabled = activeSourceType() === 'dhan' || !(runValid && cronOk);
     if (hint) hint.textContent = cronOk ? cronToHuman(cronVal) : '';
   }
 
   async function saveSchedule() {
+    if (activeSourceType() === 'dhan') {
+      alert('Use the CLI workflow to schedule Dhan snapshots.');
+      return;
+    }
     const cronVal = document.getElementById('sched-cron').value.trim();
     if (!/^(\S+\s+){4}\S+$/.test(cronVal)) {
       alert('Invalid cron expression. Format: min hour day month weekday (e.g. 0 2 * * *)');
@@ -3886,6 +4310,7 @@
       }
 
       function _renderSchedItem(j) {
+        const escapeText = value => String(value || '').replace(/[&<>"']/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]));
         const lastRun   = j.last_run_at
           ? `Last: ${j.last_run_at.slice(0,16).replace('T',' ')}`
           : 'Never run';
@@ -3902,6 +4327,7 @@
               <div class="sched-app">${j.application_name}</div>
               <div class="sched-cron">${j.cron_expression}</div>
               ${human ? `<div class="sched-human">${human}</div>` : ''}
+              ${isSilver && j.gold_table ? `<div class="sched-human">Gold: ${escapeText(j.gold_table)} · ${escapeText(_GOLD_LABELS[j.load_strategy] || 'Replace')}</div>` : ''}
               <div class="sched-last ${statusCls}">${lastRun}${j.last_run_status ? ' · ' + j.last_run_status : ''}</div>
             </div>
             <button class="btn-sched-del" title="Remove schedule"
@@ -3931,7 +4357,9 @@
 
   function fillFormFromJob(job) {
     setPage('bronze'); setLayer('ingestion');
-    document.getElementById('application_name').dispatchEvent(new Event('input'));
+    const srcType = job.source_type || 's3';
+    const radio = document.querySelector(`input[name="source_type"][value="${srcType}"]`);
+    if (radio) { radio.checked = true; radio.dispatchEvent(new Event('change')); }
 
     const set = (id, val) => { const el = document.getElementById(id); if (el) el.value = val || ''; };
     set('application_name', job.application_name);
@@ -3940,10 +4368,6 @@
     set('source_database',  job.source_database);
     set('source_table_name', job.source_table_name);
     set('metadata_key',     job.metadata_key);
-
-    const srcType = job.source_type || 's3';
-    const radio = document.querySelector(`input[name="source_type"][value="${srcType}"]`);
-    if (radio) { radio.checked = true; radio.dispatchEvent(new Event('change')); }
 
     const wmSel = document.getElementById('write_mode_sel');
     if (wmSel) { wmSel.value = job.write_mode || 'overwrite'; wmSel.dispatchEvent(new Event('change')); }
@@ -5873,10 +6297,13 @@
       const payload = _svBuildPayload();
       if (!payload) return;
 
-      // Gold fields — oracle table auto-derived from silver target table (uppercased)
-      const oracleTable = (payload.target_table || '').toUpperCase();
-      const loadStrat   = document.querySelector('input[name="sv_load_strategy"]:checked')?.value || 'append';
+      // Preserve table spelling and use the configured Gold schema.
+      const goldTable   = (document.getElementById('gold_target_table')?.value || payload.target_table || '').trim();
+      const loadStrat   = document.querySelector('input[name="sv_load_strategy"]:checked')?.value || 'replace';
       const dateCol     = (document.getElementById('sv-sched-date-col')?.value || '').trim();
+      if (loadStrat === 'delete_and_insert' && !dateCol) {
+        alert('Date column is required for Replace Date.'); return;
+      }
 
       const btn = document.getElementById('sv-save-sched-btn');
       btn.disabled = true; btn.textContent = '⏳ Saving…';
@@ -5899,7 +6326,7 @@
             silver_sql:       sqlData.sql,
             silver_payload:   JSON.stringify(payload),
             log_level:        'INFO',
-            oracle_table:     oracleTable,
+            gold_table:       goldTable,
             load_strategy:    loadStrat,
             date_column:      dateCol,
           }),
@@ -6139,11 +6566,20 @@
         window.svValidateCron(schedCron);
       }
       // Restore Gold load strategy saved with this scheduled job
-      var savedStrat = job.load_strategy || 'append';
+      var savedStrat = job.load_strategy || 'replace';
       var stratRadio = document.querySelector('input[name="sv_load_strategy"][value="' + savedStrat + '"]');
       if (stratRadio) { stratRadio.checked = true; window.svToggleSchedDateCol(); }
       var savedDateCol = document.getElementById('sv-sched-date-col');
       if (savedDateCol) savedDateCol.value = job.date_column || '';
+      var goldTarget = document.getElementById('gold_target_table');
+      if (goldTarget) goldTarget.value = job.gold_table || payload.target_table || '';
+      var goldStrategy = document.querySelector('input[name="load_strategy"][value="' + savedStrat + '"]');
+      if (goldStrategy) goldStrategy.checked = true;
+      var goldDateColumn = document.getElementById('gold_date_column');
+      if (goldDateColumn) goldDateColumn.value = job.date_column || '';
+      var savedGoldHint = document.getElementById('sv-gold-strategy-hint');
+      if (savedGoldHint) savedGoldHint.textContent = _GOLD_LABELS[savedStrat] || savedStrat;
+      toggleGoldDateCol();
 
       document.getElementById('panel-silver') &&
         document.getElementById('panel-silver').scrollIntoView({ behavior: 'smooth' });
@@ -6157,15 +6593,7 @@
       strategy === 'delete_and_insert' ? '' : 'none';
   }
 
-  function toggleGoldHistory() {
-    const body = document.getElementById('gold-history-list');
-    const btn  = document.getElementById('gold-history-toggle-btn');
-    const show = body.style.display === 'none';
-    body.style.display = show ? '' : 'none';
-    btn.textContent = show ? 'Hide' : 'Show';
-  }
-
-  // ── Gold (Oracle ADW) form ───────────────────────────────
+  // ── Gold (Iceberg / Trino) form ──────────────────────────
   (function() {
     const form = document.getElementById('gold-form');
     if (!form) return;
@@ -6174,18 +6602,20 @@
       const appName      = document.getElementById('gold_app_name').value.trim();
       const runDate      = document.getElementById('gold_run_date').value.trim();
       const silverTable  = document.getElementById('gold_silver_table').value.trim();
-      const oracleTable  = document.getElementById('gold_oracle_table').value.trim();
-      const strategy     = document.querySelector('input[name="load_strategy"]:checked')?.value || 'append';
+      const goldTable    = document.getElementById('gold_target_table').value.trim();
+      const strategy     = document.querySelector('input[name="load_strategy"]:checked')?.value || 'replace';
       const dateColumn   = document.getElementById('gold_date_column').value.trim();
-      if (!appName || !runDate || !silverTable || !oracleTable) {
-        alert('Application name, run date, silver table, and oracle table are required.'); return;
+      if (!appName || !runDate || !silverTable || !goldTable) {
+        alert('Application name, run date, Silver table, and Gold target table are required.'); return;
       }
       if (strategy === 'delete_and_insert' && !dateColumn) {
         alert('Date column is required for delete_and_insert strategy.'); return;
       }
       const btn = document.getElementById('gold-run-btn');
-      btn.disabled = true; btn.textContent = '⏳ Loading to Oracle…';
+      btn.disabled = true; btn.textContent = '⏳ Publishing Gold…';
       setNavDot('gold', 'running');
+      resetTLSteps();
+      setTLProgressTab('gold');
       if (!_logOpen) toggleLogPanel();
       document.getElementById('log-panel-title').textContent = 'Gold Logs';
       clearLog();
@@ -6193,28 +6623,40 @@
         application_name: appName,
         run_date:         runDate,
         silver_table:     silverTable,
-        oracle_table:     oracleTable,
+        gold_table:       goldTable,
         load_strategy:    strategy,
         date_column:      dateColumn,
       });
-      fetch('/run-oracle', {
+      return fetch('/run-gold', {
         method: 'POST',
         headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'X-CSRFToken': '{{ csrf_token() }}' },
         body: params.toString()
       }).then(async resp => {
+        if (!resp.ok) throw new Error(await resp.text());
         const reader = resp.body.getReader();
         const dec = new TextDecoder();
+        let pending = '', goldSucceeded = false, goldFailed = false;
+        function consumeGoldLine(line) {
+          if (!line) return;
+          appendLog(line); processTLLine(line);
+          if (/--- Gold Exit 0 ---/.test(line)) goldSucceeded = true;
+          if (/--- Gold Exit [^0]|\[gold\] ERROR/i.test(line)) goldFailed = true;
+        }
         while (true) {
           const { done, value } = await reader.read();
           if (done) break;
-          appendLog(dec.decode(value, { stream: true }));
+          pending += dec.decode(value, { stream: true });
+          const lines = pending.split('\n'); pending = lines.pop();
+          lines.forEach(consumeGoldLine);
         }
-        setNavDot('gold', resp.ok ? 'done' : 'fail');
+        consumeGoldLine(pending + dec.decode());
+        setNavDot('gold', goldSucceeded && !goldFailed ? 'done' : 'fail');
       }).catch(err => {
-        appendLog('ERROR: ' + err.message);
+        const line = '[gold] ERROR: ' + err.message;
+        appendLog(line); processTLLine(line);
         setNavDot('gold', 'fail');
       }).finally(() => {
-        btn.disabled = false; btn.textContent = '▶ Run DWH Gold Layer';
+        btn.disabled = false; btn.textContent = '▶ Publish Gold Layer';
       });
     });
   })();
